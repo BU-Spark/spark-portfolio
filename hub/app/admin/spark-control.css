@@ -1,0 +1,174 @@
+/* ============================================================
+   SPARK CONTROL — admin portal design system, SCOPED to /admin
+   Ported from the handoff app.css. Every token + primitive lives
+   under `.spark-control` so the PUBLIC gallery (which has no such
+   ancestor) keeps globals.css :root untouched. Font tokens
+   (--display/--body/--mono) are inherited from :root (next/font).
+   ============================================================ */
+.spark-control {
+  /* brand */
+  --teal:#0fb6a0; --teal-bright:#1fd6bb; --teal-deep:#0a8576; --teal-ink:#063e37;
+  /* canvas + surfaces */
+  --bg:#eef0ee; --bg2:#f6f7f5; --panel:#ffffff; --panel-2:#fafbfa;
+  --rail:#0b0e0d; --rail-2:#111614; --rail-line:#1e2522; --rail-txt:#9aa6a1; --rail-txt-dim:#6b7873;
+  /* ink */
+  --ink:#10201d; --ink-2:#3a4744; --ink-3:#677470; --ink-4:#93a09b;
+  --line:#e3e7e3; --line-2:#eef1ee; --field:#d4dad6;
+  /* status */
+  --amber:#c98a00; --amber-bg:#fdf4dc; --amber-line:#f0e0ad;
+  --rose:#c0362b; --rose-bg:#fbe9e7; --rose-line:#f1cdc8;
+  --grn:#13855b; --grn-bg:#e0f3ea; --grn-line:#bce4d0;
+  /* shape */
+  --r-lg:18px; --r:14px; --r-sm:10px; --r-xs:7px;
+  --sh-sm:0 1px 2px rgba(12,20,18,.05), 0 1px 3px rgba(12,20,18,.04);
+  --sh:0 4px 14px rgba(12,20,18,.06), 0 2px 5px rgba(12,20,18,.04);
+  --sh-lg:0 22px 48px -18px rgba(12,20,18,.22), 0 8px 20px -10px rgba(12,20,18,.12);
+  --sh-teal:0 12px 30px -10px rgba(15,182,160,.5);
+  --rail-w:248px;
+
+  background:var(--bg); color:var(--ink);
+}
+.spark-control ::selection{background:rgba(15,182,160,.26);}
+.spark-control :focus-visible{outline:2px solid var(--teal); outline-offset:3px; border-radius:6px;}
+
+/* ---------- App frame ---------- */
+.spark-control.app{display:grid; grid-template-columns:var(--rail-w) 1fr; min-height:100vh;}
+
+/* ---------- Sidebar ---------- */
+.spark-control .rail{background:var(--rail); color:var(--rail-txt); position:sticky; top:0; height:100vh; display:flex; flex-direction:column;
+  border-right:1px solid var(--rail-line); overflow:hidden;}
+.spark-control .rail::before{content:""; position:absolute; top:-120px; left:-60px; width:280px; height:280px; pointer-events:none;
+  background:radial-gradient(circle, rgba(15,182,160,.20), transparent 68%);}
+.spark-control .rail-brand{display:flex; align-items:center; gap:11px; padding:22px 22px 18px; position:relative;}
+.spark-control .rail-logo{width:36px; height:36px; border-radius:10px; background:linear-gradient(150deg,var(--teal),var(--teal-deep));
+  display:grid; place-items:center; font-family:var(--display); font-weight:700; font-size:19px; color:#04201c; box-shadow:var(--sh-teal); overflow:hidden;}
+.spark-control .rail-logo img{width:100%; height:100%; object-fit:cover;}
+.spark-control .rail-brand .wm{font-family:var(--display); font-weight:700; font-size:18px; color:#fff; letter-spacing:-.01em;}
+.spark-control .rail-brand .wm i{color:var(--teal-bright); font-style:normal;}
+.spark-control .rail-brand .sub{display:block; font-family:var(--mono); font-size:9.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--rail-txt-dim); margin-top:2px;}
+.spark-control .rail-nav{flex:1; overflow-y:auto; padding:6px 12px 12px;}
+.spark-control .rail-nav::-webkit-scrollbar{width:0;}
+.spark-control .rail-grp{font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase; color:var(--rail-txt-dim);
+  padding:16px 12px 9px;}
+.spark-control .rail-link{display:flex; align-items:center; gap:12px; padding:9px 12px; border-radius:10px; color:var(--rail-txt);
+  font-size:13.5px; font-weight:500; position:relative; transition:background .15s,color .15s; margin-bottom:2px; cursor:pointer;}
+.spark-control .rail-link svg{width:17px; height:17px; flex-shrink:0; opacity:.85;}
+.spark-control .rail-link:hover{background:rgba(255,255,255,.05); color:#e8efec;}
+.spark-control .rail-link.on{background:linear-gradient(100deg,rgba(15,182,160,.20),rgba(15,182,160,.07)); color:#fff;}
+.spark-control .rail-link.on::before{content:""; position:absolute; left:-12px; top:8px; bottom:8px; width:3px; border-radius:0 3px 3px 0; background:var(--teal-bright); box-shadow:0 0 12px var(--teal);}
+.spark-control .rail-link.on svg{opacity:1; color:var(--teal-bright);}
+.spark-control .rail-badge{margin-left:auto; font-family:var(--mono); font-size:10.5px; font-weight:600; background:var(--teal); color:#04201c;
+  border-radius:999px; padding:2px 8px; min-width:20px; text-align:center;}
+.spark-control .rail-foot{border-top:1px solid var(--rail-line); padding:14px; display:flex; align-items:center; gap:11px;}
+.spark-control .rail-ava{width:34px; height:34px; border-radius:50%; background:linear-gradient(140deg,#2b3a36,#16201d); display:grid; place-items:center;
+  font-family:var(--mono); font-size:12px; font-weight:600; color:var(--teal-bright); border:1px solid var(--rail-line); flex-shrink:0;}
+.spark-control .rail-foot .who{flex:1; min-width:0; display:flex; flex-direction:column;}
+.spark-control .rail-foot .nm{font-size:12.5px; color:#dfe7e4; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.spark-control .rail-foot .em{font-family:var(--mono); font-size:10px; color:var(--rail-txt-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.spark-control .rail-foot .out{flex-shrink:0; width:30px; height:30px; border-radius:8px; border:1px solid var(--rail-line); background:transparent;
+  color:var(--rail-txt); display:grid; place-items:center; cursor:pointer; transition:all .15s;}
+.spark-control .rail-foot .out:hover{border-color:#33403b; color:#fff; background:rgba(255,255,255,.04);}
+
+/* ---------- Canvas ---------- */
+.spark-control .canvas{min-width:0; display:flex; flex-direction:column;}
+.spark-control .sc-topbar{display:flex; align-items:center; gap:18px; padding:20px 38px; position:sticky; top:0; z-index:30;
+  background:color-mix(in srgb,var(--bg) 86%,transparent); backdrop-filter:blur(12px); border-bottom:1px solid var(--line);}
+.spark-control .sc-topbar .ey{font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--teal-deep);}
+.spark-control .sc-topbar h1{font-family:var(--display); font-size:24px; font-weight:700; letter-spacing:-.02em; line-height:1.05; margin-top:3px;}
+.spark-control .sc-topbar .grow{flex:1;}
+.spark-control .search{display:flex; align-items:center; gap:9px; background:var(--panel); border:1px solid var(--line); border-radius:11px;
+  padding:9px 13px; width:300px; max-width:34vw; box-shadow:var(--sh-sm); transition:border-color .15s, box-shadow .15s;}
+.spark-control .search:focus-within{border-color:var(--teal); box-shadow:0 0 0 3px rgba(15,182,160,.12);}
+.spark-control .search svg{width:16px;height:16px;color:var(--ink-4); flex-shrink:0;}
+.spark-control .search input{border:none; outline:none; background:none; font-family:var(--body); font-size:13.5px; width:100%; color:var(--ink);}
+.spark-control .content{padding:30px 38px 80px; max-width:1320px; width:100%;}
+
+/* ---------- Buttons ---------- */
+.spark-control .btn{display:inline-flex; align-items:center; gap:9px; cursor:pointer; border:none; border-radius:11px; white-space:nowrap;
+  font-family:var(--display); font-size:14px; font-weight:600; padding:11px 18px; transition:transform .15s, box-shadow .15s, background .15s;}
+.spark-control .btn svg{width:16px;height:16px;}
+.spark-control .btn-teal{background:linear-gradient(140deg,var(--teal),var(--teal-deep)); color:#042a25; box-shadow:var(--sh-teal);}
+.spark-control .btn-teal:hover{transform:translateY(-2px); box-shadow:0 18px 36px -10px rgba(15,182,160,.6);}
+.spark-control .btn-dark{background:var(--ink); color:#fff; box-shadow:var(--sh);}
+.spark-control .btn-dark:hover{transform:translateY(-2px); box-shadow:var(--sh-lg);}
+.spark-control .btn-ghost{background:var(--panel); color:var(--ink-2); border:1px solid var(--field);}
+.spark-control .btn-ghost:hover{border-color:var(--ink-4);}
+.spark-control .btn-sm{font-family:var(--mono); font-size:11.5px; font-weight:600; padding:7px 13px; border-radius:9px; cursor:pointer;
+  border:1px solid var(--field); background:var(--panel); color:var(--ink-2); transition:all .15s; white-space:nowrap;}
+.spark-control .btn-sm:hover{border-color:var(--ink-4);}
+.spark-control .btn-sm.teal{background:var(--teal); color:#042a25; border-color:transparent;}
+.spark-control .tlink{font-family:var(--mono); font-size:12px; font-weight:600; color:var(--teal-deep); cursor:pointer; background:none; border:none; padding:0; display:inline-flex; align-items:center; gap:5px;}
+.spark-control .tlink:hover{color:var(--teal);}
+
+/* ---------- Cards ---------- */
+.spark-control .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--r-lg); box-shadow:var(--sh-sm);}
+.spark-control .card-pad{padding:22px 24px;}
+.spark-control .eyebrow{font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-4);}
+.spark-control .sec-title{font-family:var(--display); font-weight:700; font-size:16px; letter-spacing:-.01em;}
+
+/* ---------- Badges / chips ---------- */
+.spark-control .badge{font-family:var(--mono); font-size:9.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; border-radius:6px; padding:3px 7px; display:inline-flex; align-items:center; gap:4px;}
+.spark-control .b-draft{color:var(--ink-3); background:var(--bg2); border:1px solid var(--line);}
+.spark-control .b-amber{color:var(--amber); background:var(--amber-bg); border:1px solid var(--amber-line);}
+.spark-control .b-grn{color:var(--grn); background:var(--grn-bg); border:1px solid var(--grn-line);}
+.spark-control .b-teal{color:var(--teal-deep); background:color-mix(in oklab,var(--teal) 13%,#fff); border:1px solid color-mix(in oklab,var(--teal) 26%,#fff);}
+.spark-control .chip{font-family:var(--mono); font-size:11px; color:var(--ink-2); background:var(--bg2); border:1px solid var(--line); border-radius:7px; padding:3px 9px;}
+
+/* ---------- Fields ---------- */
+.spark-control .fld{width:100%; box-sizing:border-box; padding:11px 13px; border:1px solid var(--field); border-radius:var(--r-sm);
+  font-size:14px; font-family:var(--body); background:var(--panel); outline:none; color:var(--ink); transition:border-color .15s, box-shadow .15s;}
+.spark-control .fld:focus{border-color:var(--teal); box-shadow:0 0 0 3px rgba(15,182,160,.12);}
+
+/* ---------- Toast ---------- */
+.spark-control .sc-toast{position:fixed; bottom:26px; left:calc(50% + var(--rail-w)/2); transform:translateX(-50%); z-index:200;
+  background:var(--ink); color:#fff; padding:13px 20px; border-radius:12px; box-shadow:var(--sh-lg); font-size:13.5px;
+  display:flex; align-items:center; gap:11px; animation:sc-tin .28s cubic-bezier(.22,1,.36,1);}
+.spark-control .sc-toast .dot{width:8px;height:8px;border-radius:50%; background:var(--teal-bright); box-shadow:0 0 10px var(--teal);}
+.spark-control .sc-toast.err .dot{background:#ff6b5e; box-shadow:0 0 10px #ff6b5e;}
+@keyframes sc-tin{from{opacity:0; transform:translate(-50%,12px);} to{opacity:1; transform:translate(-50%,0);}}
+
+/* ---------- Page title row ---------- */
+.spark-control .titlerow{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:24px;}
+.spark-control .subcopy{font-size:14px; line-height:1.55; color:var(--ink-3); max-width:640px; margin:8px 0 0;}
+.spark-control .subcopy b{color:var(--ink-2);} .spark-control .subcopy a{color:var(--teal-deep);}
+
+/* ---------- List rows ---------- */
+.spark-control .listcard{overflow:hidden;}
+.spark-control .lrow{display:flex; align-items:center; gap:14px; padding:14px 22px; border-top:1px solid var(--line-2); cursor:pointer; transition:background .12s;}
+.spark-control .lrow:first-child{border-top:none;}
+.spark-control .lrow:hover{background:#f7f9f8;}
+.spark-control .lrow .ttl{font-family:var(--display); font-weight:600; font-size:14.5px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+.spark-control .lrow .meta{font-family:var(--mono); font-size:11.5px; color:var(--ink-4); margin-top:4px;}
+.spark-control .rowact{display:flex; align-items:center; gap:10px; flex-shrink:0;}
+.spark-control .empty{padding:40px 24px; text-align:center; color:var(--ink-4); font-size:14px;}
+
+/* ---------- Tabs / segmented ---------- */
+.spark-control .tabs{display:flex; gap:7px; flex-wrap:wrap;}
+.spark-control .tab{font-family:var(--mono); font-size:12px; font-weight:600; border-radius:9px; padding:8px 14px; cursor:pointer; white-space:nowrap; border:1px solid var(--field); background:var(--panel); color:var(--ink-3); transition:all .15s;}
+.spark-control .tab .c{opacity:.6;}
+.spark-control .tab.on{border-color:transparent; background:var(--ink); color:#fff;}
+.spark-control .tab.on .c{opacity:.7;}
+
+/* ---------- Key/value rows (project detail admin zone, profile, etc.) ---------- */
+.spark-control .kv{display:grid; grid-template-columns:150px 1fr; gap:11px 14px; align-items:baseline;}
+.spark-control .kv .k{font-family:var(--mono); font-size:12px; color:var(--ink-4);}
+.spark-control .kv .v{font-size:14px; color:var(--ink); min-width:0;}
+
+/* ---------- Section divider label ("ADMIN ONLY — NEVER PUBLIC" etc.) ---------- */
+.spark-control .divider-label{display:flex; align-items:center; gap:14px; margin:30px 0 18px;}
+.spark-control .divider-label .ln{flex:1; height:1px; background:var(--line);}
+.spark-control .divider-label .tx{font-family:var(--mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--amber);}
+
+/* ---------- Misc ---------- */
+.spark-control .banner{display:flex; align-items:center; gap:12px; border-radius:var(--r); padding:13px 16px; margin-bottom:20px;}
+.spark-control .banner.amber{background:var(--amber-bg); border:1px solid var(--amber-line); border-left:4px solid #e0a93c;}
+.spark-control .banner .bt{font-family:var(--display); font-weight:700; font-size:14px; color:var(--amber);}
+.spark-control .banner .bs{font-size:13px; color:#7a5a14;}
+.spark-control .sk{background:linear-gradient(90deg,#eef0ef 0%,#f7f8f7 50%,#eef0ef 100%); background-size:200% 100%; border-radius:7px; animation:sc-shim 1.3s ease-in-out infinite;}
+@keyframes sc-shim{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+
+@media (prefers-reduced-motion: reduce){ .spark-control *,.spark-control *::before,.spark-control *::after{transition:none!important; animation:none!important;} }
+@media (max-width:1080px){ .spark-control{--rail-w:72px;}
+  .spark-control .rail-brand .wm,.spark-control .rail-brand .sub,.spark-control .rail-grp,.spark-control .rail-link span,.spark-control .rail-foot .who{display:none;}
+  .spark-control .rail-link{justify-content:center;} .spark-control .rail-foot{justify-content:center;}
+  .spark-control .rail-badge{position:absolute; top:4px; right:4px; padding:0 5px; min-width:0;} }

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spark! Project Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Spectral:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: #1a1a1a;
+    background: #0e1211;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  #root { min-height: 100vh; }
+  input, select, button { font-family: inherit; }
+  ::selection { background: rgba(15,163,146,0.25); }
+
+  @keyframes sparkFade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes sparkSlide { from { transform: translateX(40px); opacity: 0.4; } to { transform: translateX(0); opacity: 1; } }
+
+  .spark-card-a, .spark-card-b, .spark-card-c {
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  }
+  .spark-card-a:hover, .spark-card-c:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.10);
+    border-color: #d8d8d8;
+  }
+  .spark-card-b:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 38px rgba(0,0,0,0.16);
+  }
+  .spark-row { transition: background 0.12s ease; }
+  .spark-row:hover { background: #f7f9f8; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spark-card-a, .spark-card-b, .spark-card-c, .spark-row { transition: none; }
+    [style*="sparkSlide"], [style*="sparkFade"] { animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="data/projects.js"></script>
+<script src="image-slot.js"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="js/store.jsx"></script>
+<script type="text/babel" src="js/shared.jsx"></script>
+<script type="text/babel" src="js/detail.jsx"></script>
+<script type="text/babel" src="js/directionA.jsx"></script>
+<script type="text/babel" src="js/app.jsx"></script>
+</body>
+</html>
