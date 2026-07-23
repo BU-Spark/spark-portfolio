@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.sqlite3
+.DS_Store
+.pytest_cache/
+*.egg-info/
+
+# The monorepo root .gitignore is broad (ignores *.png). Re-include the ER-diagram
+# export the data-model review doc references so it renders inside the monorepo.
+!*.png
