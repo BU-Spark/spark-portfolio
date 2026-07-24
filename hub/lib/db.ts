@@ -6,7 +6,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { unstable_cache } from "next/cache";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { Pool } from "pg";
+import { Client, Pool, type PoolClient } from "pg";
 import type {
   Project,
   ProjectContact,
@@ -26,29 +26,29 @@ const globalForPool = globalThis as unknown as { sparkPool?: Pool };
 
 type HyperdriveBinding = { connectionString?: string };
 
-async function getPool(): Promise<Pool> {
+type DatabaseClient = Client | PoolClient;
+
+async function getHyperdriveConnectionString(): Promise<string | undefined> {
+  try {
+    const { env } = await getCloudflareContext({ async: true });
+    return (env as { HYPERDRIVE?: HyperdriveBinding }).HYPERDRIVE?.connectionString;
+  } catch {
+    // No Cloudflare context is expected for ordinary local Next.js commands.
+    return undefined;
+  }
+}
+
+function getPool(): Pool {
   if (!globalForPool.sparkPool) {
-    // In a deployed Worker, Hyperdrive supplies a private connection string
-    // and owns the origin-side connection pool. Plain Next.js development does
-    // not provide a Cloudflare context, so it continues to use DATABASE_URL.
-    let hyperdriveConnectionString: string | undefined;
-    try {
-      const { env } = await getCloudflareContext({ async: true });
-      hyperdriveConnectionString = (env as { HYPERDRIVE?: HyperdriveBinding }).HYPERDRIVE
-        ?.connectionString;
-    } catch {
-      // No Cloudflare context is expected for ordinary local Next.js commands.
-    }
-    const connectionString = hyperdriveConnectionString ?? process.env.DATABASE_URL;
+    const connectionString = process.env.DATABASE_URL;
     if (!connectionString) {
-      throw new Error("DATABASE_URL is not set and no Hyperdrive binding is available");
+      throw new Error("DATABASE_URL is not set");
     }
     const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
     globalForPool.sparkPool = new Pool({
       connectionString,
-      // Railway's public Postgres requires TLS; local and Hyperdrive do not
-      // need the application to configure TLS itself.
-      ssl: isLocal || hyperdriveConnectionString ? undefined : { rejectUnauthorized: false },
+      // Railway's public Postgres requires TLS; local does not.
+      ssl: isLocal ? undefined : { rejectUnauthorized: false },
       // Small per-instance cap: on Vercel each warm lambda holds its own pool, so
       // many instances under a spike would otherwise multiply connections past
       // Railway Postgres's max. Keep it low; pair with caching + a pooler at scale.
@@ -59,12 +59,29 @@ async function getPool(): Promise<Pool> {
   return globalForPool.sparkPool;
 }
 
+async function acquireClient(): Promise<{ client: DatabaseClient; release: () => Promise<void> }> {
+  const hyperdriveConnectionString = await getHyperdriveConnectionString();
+  if (hyperdriveConnectionString) {
+    // Hyperdrive owns the origin-side pool. Do not retain a pg Pool in the
+    // Worker isolate: its stale client sockets cause intermittent 1101 errors.
+    const client = new Client({ connectionString: hyperdriveConnectionString });
+    await client.connect();
+    return { client, release: () => client.end() };
+  }
+
+  const client = await getPool().connect();
+  return { client, release: async () => client.release() };
+}
+
 export async function query<T = Record<string, unknown>>(
   text: string,
   params?: unknown[]
 ): Promise<T[]> {
+  let release: (() => Promise<void>) | undefined;
   try {
-    const res = await (await getPool()).query(text, params as never);
+    const acquired = await acquireClient();
+    release = acquired.release;
+    const res = await acquired.client.query(text, params as never);
     return res.rows as T[];
   } catch (error) {
     // Cloudflare otherwise reports only pg-pool's rethrow frame. Keep this
@@ -85,6 +102,8 @@ export async function query<T = Record<string, unknown>>(
       syscall: typeof dbError.syscall === "string" ? dbError.syscall : undefined,
     });
     throw error;
+  } finally {
+    await release?.();
   }
 }
 
@@ -608,7 +627,7 @@ export async function mergeProjects(
 
   const nz = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 
-  const client = await (await getPool()).connect();
+  const { client, release } = await acquireClient();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query<RawRow>(
@@ -728,7 +747,7 @@ export async function mergeProjects(
     await client.query("ROLLBACK");
     throw e;
   } finally {
-    client.release();
+    await release();
   }
 }
 
@@ -1213,7 +1232,7 @@ export async function setProjectContributors(
   const clean = contributors.filter(
     (c) => nz(c.firstName) || nz(c.lastName) || nz(c.githubUsername) || nz(c.email)
   );
-  const client = await (await getPool()).connect();
+  const { client, release } = await acquireClient();
   try {
     await client.query("BEGIN");
     await client.query(`DELETE FROM contributors WHERE project_id = $1`, [projectId]);
@@ -1229,7 +1248,7 @@ export async function setProjectContributors(
     await client.query("ROLLBACK");
     throw e;
   } finally {
-    client.release();
+    await release();
   }
 }
 
@@ -1508,7 +1527,7 @@ export async function mergePeople(sourceId: number, targetId: number): Promise<b
   const email = target.email ?? source.email;
   const notes = target.notes ?? source.notes;
 
-  const client = await (await getPool()).connect();
+  const { client, release } = await acquireClient();
   try {
     await client.query("BEGIN");
     await client.query(
@@ -1531,7 +1550,7 @@ export async function mergePeople(sourceId: number, targetId: number): Promise<b
     await client.query("ROLLBACK");
     throw e;
   } finally {
-    client.release();
+    await release();
   }
   return true;
 }
