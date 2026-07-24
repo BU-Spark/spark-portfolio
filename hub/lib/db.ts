@@ -48,8 +48,29 @@ export async function query<T = Record<string, unknown>>(
   text: string,
   params?: unknown[]
 ): Promise<T[]> {
-  const res = await getPool().query(text, params as never);
-  return res.rows as T[];
+  try {
+    const res = await getPool().query(text, params as never);
+    return res.rows as T[];
+  } catch (error) {
+    // Cloudflare otherwise reports only pg-pool's rethrow frame. Keep this
+    // intentionally limited to connection/error metadata: query parameters and
+    // DATABASE_URL may contain customer data or credentials.
+    const dbError = error as {
+      name?: unknown;
+      message?: unknown;
+      code?: unknown;
+      errno?: unknown;
+      syscall?: unknown;
+    };
+    console.error("Postgres query failed", {
+      name: typeof dbError.name === "string" ? dbError.name : undefined,
+      message: typeof dbError.message === "string" ? dbError.message : undefined,
+      code: typeof dbError.code === "string" ? dbError.code : undefined,
+      errno: typeof dbError.errno === "string" ? dbError.errno : undefined,
+      syscall: typeof dbError.syscall === "string" ? dbError.syscall : undefined,
+    });
+    throw error;
+  }
 }
 
 // Turn a stored image key into a servable URL. Full URLs pass through; bare
