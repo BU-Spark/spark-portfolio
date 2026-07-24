@@ -5,6 +5,7 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { unstable_cache } from "next/cache";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { Pool } from "pg";
 import type {
   Project,
@@ -23,17 +24,31 @@ import { semesterRank } from "./semester";
 // Reuse one pool across hot reloads / warm serverless invocations.
 const globalForPool = globalThis as unknown as { sparkPool?: Pool };
 
-function getPool(): Pool {
+type HyperdriveBinding = { connectionString?: string };
+
+async function getPool(): Promise<Pool> {
   if (!globalForPool.sparkPool) {
-    const connectionString = process.env.DATABASE_URL;
+    // In a deployed Worker, Hyperdrive supplies a private connection string
+    // and owns the origin-side connection pool. Plain Next.js development does
+    // not provide a Cloudflare context, so it continues to use DATABASE_URL.
+    let hyperdriveConnectionString: string | undefined;
+    try {
+      const { env } = await getCloudflareContext({ async: true });
+      hyperdriveConnectionString = (env as { HYPERDRIVE?: HyperdriveBinding }).HYPERDRIVE
+        ?.connectionString;
+    } catch {
+      // No Cloudflare context is expected for ordinary local Next.js commands.
+    }
+    const connectionString = hyperdriveConnectionString ?? process.env.DATABASE_URL;
     if (!connectionString) {
-      throw new Error("DATABASE_URL is not set");
+      throw new Error("DATABASE_URL is not set and no Hyperdrive binding is available");
     }
     const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
     globalForPool.sparkPool = new Pool({
       connectionString,
-      // Railway's public Postgres requires TLS; local does not.
-      ssl: isLocal ? undefined : { rejectUnauthorized: false },
+      // Railway's public Postgres requires TLS; local and Hyperdrive do not
+      // need the application to configure TLS itself.
+      ssl: isLocal || hyperdriveConnectionString ? undefined : { rejectUnauthorized: false },
       // Small per-instance cap: on Vercel each warm lambda holds its own pool, so
       // many instances under a spike would otherwise multiply connections past
       // Railway Postgres's max. Keep it low; pair with caching + a pooler at scale.
@@ -49,7 +64,7 @@ export async function query<T = Record<string, unknown>>(
   params?: unknown[]
 ): Promise<T[]> {
   try {
-    const res = await getPool().query(text, params as never);
+    const res = await (await getPool()).query(text, params as never);
     return res.rows as T[];
   } catch (error) {
     // Cloudflare otherwise reports only pg-pool's rethrow frame. Keep this
@@ -593,7 +608,7 @@ export async function mergeProjects(
 
   const nz = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 
-  const client = await getPool().connect();
+  const client = await (await getPool()).connect();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query<RawRow>(
@@ -1198,7 +1213,7 @@ export async function setProjectContributors(
   const clean = contributors.filter(
     (c) => nz(c.firstName) || nz(c.lastName) || nz(c.githubUsername) || nz(c.email)
   );
-  const client = await getPool().connect();
+  const client = await (await getPool()).connect();
   try {
     await client.query("BEGIN");
     await client.query(`DELETE FROM contributors WHERE project_id = $1`, [projectId]);
@@ -1493,7 +1508,7 @@ export async function mergePeople(sourceId: number, targetId: number): Promise<b
   const email = target.email ?? source.email;
   const notes = target.notes ?? source.notes;
 
-  const client = await getPool().connect();
+  const client = await (await getPool()).connect();
   try {
     await client.query("BEGIN");
     await client.query(

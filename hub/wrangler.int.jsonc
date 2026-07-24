@@ -8,6 +8,12 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "48e24f5e423548dbb73b44900e9d1cc1"
+    }
+  ],
   "routes": [
     {
       "pattern": "int.hub.buspark.io",
