@@ -8,6 +8,26 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Workers can't hold long-lived Postgres connections, so every query goes through
+  // Hyperdrive's pooler. lib/db.ts reads env.HYPERDRIVE.connectionString and falls
+  // back to DATABASE_URL for local dev — so the absence of this block was the whole
+  // reason hub.buspark.io returned 500 on every request while int was fine.
+  //
+  // This id must stay pointed at the PROD database and int's at nonprod. To check
+  // which one a binding actually resolves to:
+  //   select count(*) from users where is_super;   -- 2 = prod, 0 = nonprod
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "bca00a5c430447bf9658f69e1b70dc3f"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "hub.buspark.io",
+      "custom_domain": true
+    }
+  ],
   "preview_urls": true,
   "observability": {
     "enabled": true
