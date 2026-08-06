@@ -1,0 +1,72 @@
+// Chen-notation ER diagram for the Spark Testimonial Scraper.
+// Rectangles = entities, double rectangle = weak entity, ovals = attributes
+// (PK underlined), diamonds = relationships (double diamond = identifying),
+// edge labels = cardinality. Render: dot -Kneato -Tpng er_diagram_chen.dot -o er_diagram_chen.png
+graph ER {
+  layout=neato; overlap=false; splines=true; sep="+10"; bgcolor=white;
+  node [fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=9, len=1.5, color="#555555"];
+
+  /* ---------------- entities (rectangles) ---------------- */
+  node [shape=box, style=filled, fillcolor="#cfe8ff", penwidth=1.4];
+  Platform [label="Platform"];
+  CredentialSet [label="Credential Set"];
+  ScrapeRun [label="Scrape Run"];
+  Author [label="Author"];
+  Mention [label="Mention"];
+  Project [label="Project"];
+  Testimonial [label="Testimonial"];
+  Summary [label="Summary"];
+
+  /* ---------------- weak entity (double rectangle) ---------------- */
+  node [shape=box, peripheries=2, fillcolor="#cfe8ff"];
+  TElement [label="Testimonial Element"];
+
+  /* ---------------- relationships (diamonds) ---------------- */
+  node [shape=diamond, style=filled, fillcolor="#ffe9a8", peripheries=1, fixedsize=false];
+  R_has [label="has"];
+  R_auth [label="authenticates"];
+  R_hosts [label="hosts"];
+  R_produces [label="produces"];
+  R_posts [label="posts"];
+  R_yields [label="yields"];
+  R_refs [label="references"];
+  R_summ [label="summarizes"];
+  /* identifying relationship for the weak entity (double diamond) */
+  node [shape=diamond, peripheries=2, fillcolor="#ffe9a8"];
+  R_comp [label="composed of"];
+
+  /* ---------------- attributes (ovals; PK underlined) ---------------- */
+  node [shape=ellipse, peripheries=1, style=filled, fillcolor="#f0f0f0", fontsize=10];
+  p_id [label=<<u>id</u>>]; p_name [label="name"];
+  c_id [label=<<u>id</u>>]; c_prov [label="provider_type"]; c_loc [label="secret_locator"];
+  s_id [label=<<u>id</u>>]; s_seed [label="seed"]; s_status [label="status"];
+  a_id [label=<<u>id</u>>]; a_uid [label="platform_user_id"]; a_name [label="display_name"];
+  m_id [label=<<u>id</u>>]; m_pid [label="platform_post_id"]; m_text [label="raw_text"]; m_date [label="posted_at"];
+  pr_id [label=<<u>id</u>>]; pr_name [label="name"]; pr_ext [label="external_id"];
+  t_id [label=<<u>id</u>>]; t_kind [label="kind"]; t_sent [label="sentiment"]; t_conf [label="confidence"]; t_quote [label="extracted_quote"];
+  te_id [label=<<u>id</u>>]; te_type [label="element_type"]; te_val [label="value_text"];
+  su_id [label=<<u>id</u>>]; su_scope [label="scope"]; su_text [label="summary_text"];
+
+  /* attribute edges (entity -- attribute) */
+  Platform -- {p_id p_name};
+  CredentialSet -- {c_id c_prov c_loc};
+  ScrapeRun -- {s_id s_seed s_status};
+  Author -- {a_id a_uid a_name};
+  Mention -- {m_id m_pid m_text m_date};
+  Project -- {pr_id pr_name pr_ext};
+  Testimonial -- {t_id t_kind t_sent t_conf t_quote};
+  TElement -- {te_id te_type te_val};
+  Summary -- {su_id su_scope su_text};
+
+  /* ---------------- relationship edges (entity -- diamond -- entity) ---------------- */
+  Platform   -- R_has      [label="1"];   R_has      -- CredentialSet [label="N"];
+  CredentialSet -- R_auth  [label="1"];   R_auth     -- ScrapeRun     [label="N"];
+  Platform   -- R_hosts    [label="1"];   R_hosts    -- Author        [label="N"];
+  ScrapeRun  -- R_produces [label="1"];   R_produces -- Mention       [label="N"];
+  Author     -- R_posts    [label="1"];   R_posts    -- Mention       [label="N"];
+  Mention    -- R_yields   [label="1"];   R_yields   -- Testimonial   [label="N"];
+  Testimonial -- R_comp    [label="1"];   R_comp     -- TElement      [label="N"];
+  Mention    -- R_refs     [label="M"];   R_refs     -- Project       [label="N"];
+  Summary    -- R_summ     [label="M"];   R_summ     -- Testimonial   [label="N"];
+}
