@@ -14,6 +14,57 @@
 import { matchKey, splitClientProject, editDistance } from "./gdocs";
 import type { Project } from "./types";
 
+// The tracker-row contract and its validator live here rather than in import.ts
+// for the same reason the matchers do: import.ts is `server-only`, so nothing in
+// it can be reached from a test. This is untrusted input from two entry points,
+// which is precisely the code that should not be untestable.
+/**
+ * Keeps only the elements that are actually row-shaped. Both entry points used to
+ * hand `body.rows` to runImport after an `Array.isArray` check alone, so a single
+ * `null` or `"x"` element reached `r.project` and threw a TypeError — an unhandled
+ * 500 for what is really a malformed request, and for the Apps Script feed that
+ * meant one bad cell failed the entire sync instead of being reported as a bad row.
+ * Shared so the two callers can't drift apart.
+ */
+export function coerceRows(rows: unknown): IncomingRow[] {
+  if (!Array.isArray(rows)) return [];
+  const out: IncomingRow[] = [];
+  for (const r of rows) {
+    if (typeof r !== "object" || r === null || Array.isArray(r)) continue;
+    // Field types matter, not just the row shape: runImport calls .trim() on
+    // project, techText and the URL fields, so `{ project: 1 }` would pass an
+    // object-only check and still throw a TypeError one frame later.
+    //
+    // Non-string fields are STRIPPED rather than used to reject the whole row.
+    // Rejecting would make the row vanish before runImport counts it — not even
+    // landing in `skipped` — so a tracker column that started emitting a number
+    // would silently shrink every sync with nothing to point at. Dropping the one
+    // bad field keeps the project name, which is what matching actually needs.
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(r)) if (typeof v === "string") clean[k] = v;
+    if (clean.project) out.push(clean as unknown as IncomingRow);
+  }
+  return out;
+}
+
+export interface IncomingRow {
+  project: string; // project name (match key)
+  client?: string; // raw Organization / "Client(s) Name & Email" cell
+  github?: string; // repo URL (from the GitHub cell's link)
+  gfolder?: string; // Google Drive project folder URL (direct from "GFolder" column)
+  course?: string; // e.g. "DS539"
+  semester?: string; // e.g. "Spring 2026"
+  pdUrl?: string; // source PD doc link — stored admin-only for manual re-pull
+  techText?: string; // raw PD "Tech Stack" table cell
+  pdText?: string; // full plain text of the PD Google Doc
+  programLead?: string; // Spark! roles (plain-text cells from the tracker)
+  pm?: string;
+  tpm?: string;
+  seniorAdvisor?: string;
+  techAdvisor?: string;
+  eir?: string;
+}
+
 export interface MatchIndex {
   byId: Map<string, Project>;
   byFull: Map<string, Project>;

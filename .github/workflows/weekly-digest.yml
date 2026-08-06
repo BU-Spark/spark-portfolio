@@ -37,6 +37,19 @@ on:
 # No checkout, so no repository contents are needed.
 permissions: {}
 
+# Two overlapping runs would both read the same snapshot, build the same digest and
+# post it, sending the channel a duplicate. This is the platform's own mutex and it
+# covers the only way the route is invoked on a schedule. cancel-in-progress is
+# deliberately false so a manual run queues behind a scheduled one instead of killing
+# it mid-post.
+#
+# It does NOT serialise someone curling the endpoint twice by hand. Accepted: the
+# alternative is a durable per-org lease table, i.e. real schema plus lock-expiry
+# handling, to protect a weekly Slack message from a human holding the token.
+concurrency:
+  group: weekly-approvals-digest
+  cancel-in-progress: false
+
 jobs:
   digest:
     runs-on: ubuntu-latest
@@ -53,8 +66,16 @@ jobs:
             exit 1
           fi
 
+          # Append with & when DIGEST_URL already carries a query string. A bare
+          # "?dry=1" on such a URL is silently ignored by the route, and the "dry"
+          # run would then really post to Slack and overwrite the snapshot.
           url="$DIGEST_URL"
-          if [ "$DRY" = "1" ]; then url="${url}?dry=1"; fi
+          if [ "$DRY" = "1" ]; then
+            case "$url" in
+              *\?*) url="${url}&dry=1" ;;
+              *)    url="${url}?dry=1" ;;
+            esac
+          fi
 
           # -sS stays quiet but still reports transport errors; the status code is
           # captured separately so a 4xx/5xx fails the job loudly instead of being

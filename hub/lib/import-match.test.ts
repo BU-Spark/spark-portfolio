@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildIndex, findMatch } from "./import-match";
+import { buildIndex, findMatch, coerceRows } from "./import-match";
 import type { Project } from "./types";
 
 // buildIndex/findMatch only read id + title, so a narrow fixture is honest here —
@@ -94,5 +94,54 @@ describe("buildIndex org scoping", () => {
     const hit = findMatch(forOrg("spark"), "WBUR: Newsroom Analytcs", noAliases);
     expect(hit?.project.id).toBe("wbur-analytics");
     expect(hit?.fuzzy).toBe(true);
+  });
+});
+
+// coerceRows is the trust boundary for both import entry points: the Apps Script
+// feed and an admin's pasted CSV. Everything it lets through gets .trim() called on
+// it downstream, so these are the cases that used to be unhandled 500s.
+describe("coerceRows", () => {
+  it("keeps well-formed rows untouched", () => {
+    const rows = coerceRows([{ project: "Herbaria", semester: "Fall 2025" }]);
+    expect(rows).toEqual([{ project: "Herbaria", semester: "Fall 2025" }]);
+  });
+
+  it("drops non-object elements instead of throwing on them", () => {
+    // The original bug: a null element reached r.project and 500'd the whole sync.
+    expect(coerceRows([null, "x", 42, [], { project: "Herbaria" }])).toEqual([
+      { project: "Herbaria" },
+    ]);
+  });
+
+  it("strips non-string fields but keeps the row", () => {
+    // A tracker column that starts emitting a number must not silently shrink the
+    // sync — the project name is what matching needs, so the row survives without
+    // the bad field rather than vanishing before runImport can count it.
+    expect(coerceRows([{ project: "Herbaria", semester: 2026, pm: { name: "x" } }])).toEqual([
+      { project: "Herbaria" },
+    ]);
+  });
+
+  it("drops rows with no usable project name", () => {
+    expect(coerceRows([{ project: 1 }, { project: "" }, { semester: "Fall 2025" }])).toEqual([]);
+  });
+
+  it("returns empty for anything that isn't an array", () => {
+    for (const bad of [null, undefined, "rows", 7, { rows: [] }]) {
+      expect(coerceRows(bad)).toEqual([]);
+    }
+  });
+
+  it("never returns a value that would throw on .trim()", () => {
+    // The invariant the two routes actually depend on, stated directly.
+    const rows = coerceRows([
+      { project: "A", techText: 5, github: null, pdUrl: undefined },
+      { project: "B", client: "Acme" },
+    ]);
+    for (const r of rows) {
+      for (const v of Object.values(r)) expect(typeof v).toBe("string");
+      expect(() => r.project.trim()).not.toThrow();
+    }
+    expect(rows).toHaveLength(2);
   });
 });

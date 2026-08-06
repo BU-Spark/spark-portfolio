@@ -108,11 +108,19 @@ async function run(req: Request): Promise<Response> {
     );
   }
 
+  // Bounded: an unresponsive webhook would otherwise hold the request open until
+  // the Worker is killed, which loses the digest AND the snapshot with no error
+  // anyone sees. A timeout turns that into the ordinary 502 path below.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 10_000);
   const res = await fetch(webhook, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, mrkdwn: true }),
-  }).catch(() => null);
+    signal: abort.signal,
+  })
+    .catch(() => null)
+    .finally(() => clearTimeout(timer));
 
   if (!res || !res.ok) {
     // Do NOT snapshot on a failed post: recording it would make the next run diff

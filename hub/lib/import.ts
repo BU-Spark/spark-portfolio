@@ -32,43 +32,14 @@ import {
   normalizeName,
   splitClientProject,
 } from "@/lib/gdocs";
-import { buildIndex, findMatch } from "@/lib/import-match";
+// IncomingRow/coerceRows live in import-match.ts because this module is
+// `server-only` and therefore untestable; re-exported so the feed contract still
+// reads as belonging to the importer.
+import { buildIndex, findMatch, type IncomingRow } from "@/lib/import-match";
+export { coerceRows, type IncomingRow } from "@/lib/import-match";
 import { semesterRank } from "@/lib/semester";
 import { parseTechStack } from "@/lib/tech";
 import type { Run } from "@/lib/types";
-
-/**
- * Keeps only the elements that are actually row-shaped. Both entry points used to
- * hand `body.rows` to runImport after an `Array.isArray` check alone, so a single
- * `null` or `"x"` element reached `r.project` and threw a TypeError — an unhandled
- * 500 for what is really a malformed request, and for the Apps Script feed that
- * meant one bad cell failed the entire sync instead of being reported as a bad row.
- * Shared so the two callers can't drift apart.
- */
-export function coerceRows(rows: unknown): IncomingRow[] {
-  if (!Array.isArray(rows)) return [];
-  return rows.filter(
-    (r): r is IncomingRow => typeof r === "object" && r !== null && !Array.isArray(r)
-  );
-}
-
-export interface IncomingRow {
-  project: string; // project name (match key)
-  client?: string; // raw Organization / "Client(s) Name & Email" cell
-  github?: string; // repo URL (from the GitHub cell's link)
-  gfolder?: string; // Google Drive project folder URL (direct from "GFolder" column)
-  course?: string; // e.g. "DS539"
-  semester?: string; // e.g. "Spring 2026"
-  pdUrl?: string; // source PD doc link — stored admin-only for manual re-pull
-  techText?: string; // raw PD "Tech Stack" table cell
-  pdText?: string; // full plain text of the PD Google Doc
-  programLead?: string; // Spark! roles (plain-text cells from the tracker)
-  pm?: string;
-  tpm?: string;
-  seniorAdvisor?: string;
-  techAdvisor?: string;
-  eir?: string;
-}
 
 export interface ImportResult {
   ok: true;
