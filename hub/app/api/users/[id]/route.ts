@@ -42,6 +42,14 @@ export async function DELETE(
     );
   }
 
-  await removeUser(id);
+  // The guard above is fast, readable feedback; this is the authoritative one. It
+  // re-checks under a row lock, so it also covers two supers deleting each other
+  // concurrently — which the count above cannot see.
+  if (!(await removeUser(id))) {
+    return Response.json(
+      { error: "Can't remove the last super admin — promote someone else first (SQL)." },
+      { status: 400 }
+    );
+  }
   return Response.json({ ok: true });
 }

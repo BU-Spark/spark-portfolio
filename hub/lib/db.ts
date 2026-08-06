@@ -693,7 +693,9 @@ export async function mergeProjects(
       `SELECT id, title, blurb, blurb_term, blurb_locked, partner, client_type,
               contact, contacts, tech, images, repo_url, prod_url, drive_url,
               tech_note, featured, published, runs, surfaces, owner_org
-         FROM projects WHERE id = ANY($1)`,
+         FROM projects WHERE id = ANY($1)
+         ORDER BY id
+         FOR UPDATE`,
       [[survivorId, absorbedId]]
     );
     const survivor = rows.find((r) => r.id === survivorId);
@@ -709,6 +711,13 @@ export async function mergeProjects(
     // invalidated by a concurrent ownership reassignment before the UPDATE lands.
     // A merge deletes the absorbed project, so a one-sided check would let a scoped
     // admin destroy the other team's record.
+    //
+    // FOR UPDATE is what actually makes that true. Being inside the transaction is
+    // not sufficient on its own: under READ COMMITTED an unlocked SELECT lets a
+    // concurrent `UPDATE projects SET owner_org = …` commit between this read and
+    // the UPDATE below, and the merge would then proceed on ownership that no longer
+    // holds. ORDER BY id fixes the lock order so two merges over the same pair
+    // queue instead of deadlocking.
     if (
       !canMerge(
         actor,
@@ -2048,8 +2057,44 @@ export async function countSuperAdmins(): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
-export async function removeUser(id: number): Promise<void> {
-  await query(`DELETE FROM users WHERE id = $1`, [id]);
+/**
+ * Deletes an admin, refusing to remove the final super admin.
+ *
+ * The rule is enforced HERE rather than by the route's preceding count, because
+ * count-then-delete is not atomic: two supers removing each other at the same
+ * moment both read a count of 2, both pass, and both commit — leaving zero supers,
+ * which is exactly the lockout the rule exists to prevent and is recoverable only
+ * with direct database access.
+ *
+ * Note that folding the count into the DELETE as
+ * `AND (SELECT count(*) FROM users WHERE is_super) > 1` does NOT fix this. Under
+ * READ COMMITTED each statement evaluates that subquery against its own snapshot,
+ * and because the two deletions target DIFFERENT rows they never conflict — so both
+ * still commit. The lock below is what actually serialises them: the second
+ * transaction blocks on the super rows, then re-reads and sees the true count.
+ *
+ * Returns false when the row survived because it was the last super admin.
+ */
+export async function removeUser(id: number): Promise<boolean> {
+  const { client, release } = await acquireClient();
+  try {
+    await client.query("BEGIN");
+    const { rows: supers } = await client.query<{ id: number }>(
+      `SELECT id FROM users WHERE is_super ORDER BY id FOR UPDATE`
+    );
+    if (supers.length <= 1 && supers.some((r) => r.id === id)) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query(`DELETE FROM users WHERE id = $1`, [id]);
+    await client.query("COMMIT");
+    return true;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    await release();
+  }
 }
 
 // --- Gallery settings (admin-editable taxonomy + facet visibility) -----------

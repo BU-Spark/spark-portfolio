@@ -13,19 +13,21 @@
 // and the import failed outright. Deleting the sub-request fixes that by
 // construction rather than by adding another env-var fallback.
 import { requireAdmin } from "@/lib/actor";
-import { runImport, type IncomingRow } from "@/lib/import";
+import { runImport, coerceRows } from "@/lib/import";
 
 export async function POST(req: Request) {
   const g = await requireAdmin();
   if (!g.ok) return g.res;
 
-  let body: { rows?: IncomingRow[] };
+  let body: { rows?: unknown };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  const rows = Array.isArray(body.rows) ? body.rows : [];
+  // coerceRows drops non-object elements, so a malformed upload lands on this 400
+  // rather than throwing inside runImport as an opaque 500.
+  const rows = coerceRows(body.rows);
   if (!rows.length) {
     return Response.json({ error: "No rows provided." }, { status: 400 });
   }

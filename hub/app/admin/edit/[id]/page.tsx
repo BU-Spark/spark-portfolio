@@ -477,6 +477,7 @@ export default function EditProjectPage() {
   );
 
   const saveContribs = async () => {
+    if (readOnly) return;
     setContribBusy(true);
     try {
       const res = await fetch("/api/contributors", {
@@ -669,6 +670,10 @@ export default function EditProjectPage() {
 
   const save = useCallback(async () => {
     if (!form || busy) return;
+    // Disabled buttons aren't the only way in: the mod+s hotkey below bypasses them
+    // entirely. The server 403s either way, so this is about not firing a request
+    // whose only possible outcome is a confusing error toast.
+    if (readOnly) return;
     if (!form.title.trim()) {
       notify("err", "Project title is required.");
       return;
@@ -769,7 +774,7 @@ export default function EditProjectPage() {
     }
     // Don't redirect instantly — let the toast register, then return to admin.
     setTimeout(() => router.push("/admin"), 1200);
-  }, [form, busy, dupRunKeys, id, notify, router]);
+  }, [form, busy, readOnly, dupRunKeys, id, notify, router]);
 
   useHotkey("mod+s", () => {
     void save();

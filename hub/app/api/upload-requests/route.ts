@@ -60,6 +60,13 @@ export async function GET(req: Request) {
   const sp = new URL(req.url).searchParams;
   const projectId = sp.get("projectId");
   if (projectId) {
+    // Per-project branch needs its own check: listProjectUploadRequests takes only
+    // a project id and applies no org filter, so without this a scoped admin could
+    // name any project and read back its upload TOKENS — and a token is a
+    // capability, granting login-free upload rights on that project. The recipient
+    // emails leaking alongside them are the smaller half of the problem.
+    const pg = await requireProject(projectId);
+    if (!pg.ok) return pg.res;
     const requests = await listProjectUploadRequests(projectId);
     return Response.json({ requests });
   }

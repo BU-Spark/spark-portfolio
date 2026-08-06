@@ -50,9 +50,25 @@ describe("buildIndex org scoping", () => {
   // work or creates duplicate projects.
   it("resolves against the other-org index so a miss can be labelled crossOrg", () => {
     const other = buildIndex(all.filter((p) => p.ownerOrg !== "cds"));
-    expect(findMatch(other, "WBUR: Newsroom Analytics", noAliases)?.project.id).toBe(
-      "wbur-analytics"
-    );
+    const hit = findMatch(other, "WBUR: Newsroom Analytics", noAliases);
+    expect(hit?.project.id).toBe("wbur-analytics");
+    // Exact, so runImport is entitled to suppress the inbox row: the project
+    // demonstrably already exists under the other team.
+    expect(hit?.fuzzy).toBe(false);
+  });
+
+  // The counterpart, and the distinction runImport now branches on. Only an EXACT
+  // cross-org hit suppresses the inbox row; a fuzzy one is a guess with an
+  // edit-distance-2 tolerance. If this stopped being distinguishable, a genuinely
+  // new project whose name merely resembles the other team's would be neither
+  // imported nor inboxed — silently dropped, recoverable only by someone reading
+  // the crossOrg list.
+  it("flags a near-miss against the other-org index as fuzzy, not exact", () => {
+    const other = buildIndex(all.filter((p) => p.ownerOrg !== "spark"));
+    // One edit from the CDS title, so it can only resolve via the fuzzy fallback.
+    const hit = findMatch(other, "WBUR: Newsroom Analytir", noAliases);
+    expect(hit?.project.id).toBe("cds-newsroom");
+    expect(hit?.fuzzy).toBe(true);
   });
 
   // Curated aliases are scoped for free because byId only holds indexed projects.

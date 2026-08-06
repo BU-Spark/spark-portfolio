@@ -37,6 +37,21 @@ import { semesterRank } from "@/lib/semester";
 import { parseTechStack } from "@/lib/tech";
 import type { Run } from "@/lib/types";
 
+/**
+ * Keeps only the elements that are actually row-shaped. Both entry points used to
+ * hand `body.rows` to runImport after an `Array.isArray` check alone, so a single
+ * `null` or `"x"` element reached `r.project` and threw a TypeError — an unhandled
+ * 500 for what is really a malformed request, and for the Apps Script feed that
+ * meant one bad cell failed the entire sync instead of being reported as a bad row.
+ * Shared so the two callers can't drift apart.
+ */
+export function coerceRows(rows: unknown): IncomingRow[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(
+    (r): r is IncomingRow => typeof r === "object" && r !== null && !Array.isArray(r)
+  );
+}
+
 export interface IncomingRow {
   project: string; // project name (match key)
   client?: string; // raw Organization / "Client(s) Name & Email" cell
@@ -106,7 +121,8 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
     const hit = findMatch(index, name, aliasMap);
     if (!hit) {
       // Before treating this as unknown, check whether the other team owns it.
-      if (findMatch(otherIndex, name, aliasMap)) {
+      const otherHit = findMatch(otherIndex, name, aliasMap);
+      if (otherHit && !otherHit.fuzzy) {
         // Deliberately NOT inboxed. An inbox row invites an admin to "create" a
         // project that already exists under the other org, producing a permanent
         // duplicate plus a project_aliases row that binds this tracker name to the
@@ -114,6 +130,12 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
         crossOrg.push(name);
         continue;
       }
+      // Only an EXACT cross-org hit is strong enough to suppress the inbox row. A
+      // fuzzy hit is a guess with an edit-distance-2 tolerance, so a genuinely new
+      // project whose name merely resembles one of the other team's would otherwise
+      // be neither imported nor inboxed — silently dropped, with recovery depending
+      // on someone reading the crossOrg list. Report the resemblance, still triage it.
+      if (otherHit) crossOrg.push(name);
       skipped.push(name);
       // Never silently dropped: capture the unmatched row for admin triage. Skip
       // obvious noise — a header/contact cell read as a project name.

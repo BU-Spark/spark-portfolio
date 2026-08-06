@@ -71,6 +71,21 @@ UPDATE import_inbox SET org       = 'spark' WHERE org       IS DISTINCT FROM 'sp
 -- `ON CONFLICT (email)`, which resolves against that exact index; dropping it
 -- breaks the insert. The paired code change re-targets it to
 -- `ON CONFLICT (lower(email))`, which this expression index satisfies.
+-- Fail fast, with the offending addresses named, if the collision this index is
+-- meant to prevent already exists. Otherwise CREATE UNIQUE INDEX raises a bare
+-- unique-violation and aborts the whole transaction with nothing actionable in the
+-- message. A clean nonprod run is no proof here: the duplicate would have to exist
+-- on the target database, so prod can fail where nonprod passed.
+DO $$
+DECLARE dupes text;
+BEGIN
+  SELECT string_agg(lower(email), ', ') INTO dupes
+    FROM users GROUP BY lower(email) HAVING count(*) > 1;
+  IF dupes IS NOT NULL THEN
+    RAISE EXCEPTION 'Case-duplicate user emails must be merged first: %', dupes;
+  END IF;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_key ON users (lower(email));
 
 -- import_inbox dedupes on name_key alone. Once CSV imports carry an org, a CDS
@@ -91,3 +106,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_import_inbox_org_name_key
 -- admin list gets real pagination.
 
 COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- SUPER ADMIN SEED — run by hand, per environment. NOT part of this migration.
+--
+-- is_super is grantable by SQL only (no API accepts the field), so after applying
+-- this file each environment needs at least one super admin or ownership
+-- reassignment, vocabulary edits, cross-org merges and POST /api/users become
+-- unreachable by ANY account.
+--
+-- Deliberately left as a comment rather than executed: this file is run against
+-- prod, nonprod and any future clone, and a migration that hard-codes email
+-- addresses would silently mint super admins on every one of them — including
+-- throwaway databases restored from a prod dump. Who holds the role is an
+-- environment decision, not a schema one.
+--
+-- Applied to prod on 2026-08-06 for these two accounts:
+--
+--   UPDATE users SET is_super = true
+--    WHERE lower(email) IN ('kzingade@bu.edu', 'langd0n@bu.edu');
+--
+--   -- Verify: expect exactly the rows you intended, and a non-zero count.
+--   SELECT id, email, org, is_super FROM users ORDER BY id;
+-- ---------------------------------------------------------------------------

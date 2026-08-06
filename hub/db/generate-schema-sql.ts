@@ -18,7 +18,7 @@ async function main() {
 
   const out: string[] = [];
   out.push(`-- Canonical schema for the BU Spark! Project Gallery DB.`);
-  out.push(`-- GENERATED from the live database by scripts/generate-schema-sql.ts — do not hand-edit.`);
+  out.push(`-- GENERATED from the live database by db/generate-schema-sql.ts — do not hand-edit.`);
   out.push(`-- Regenerate after any migration. This is the source-of-truth DDL + the Database++ seed contract.\n`);
 
   for (const t of tables) {

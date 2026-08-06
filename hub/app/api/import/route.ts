@@ -8,7 +8,7 @@
 // The row-processing logic lives in lib/import.ts and is shared with the admin CSV
 // route. This handler is only the token gate plus the org decision.
 import { timingSafeEqual } from "node:crypto";
-import { runImport, type IncomingRow } from "@/lib/import";
+import { runImport, coerceRows } from "@/lib/import";
 import { ORGS } from "@/lib/authz";
 
 // Constant-time bearer-token check (avoids leaking the secret via timing).
@@ -45,13 +45,15 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { rows?: IncomingRow[] };
+  let body: { rows?: unknown };
   try {
     body = await req.json();
   } catch {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-  const rows = Array.isArray(body.rows) ? body.rows : [];
+  // coerceRows drops non-object elements, so one malformed cell in the tracker feed
+  // is reported as a bad row instead of throwing a 500 that fails the whole sync.
+  const rows = coerceRows(body.rows);
   if (!rows.length) {
     return Response.json({ error: "No rows provided." }, { status: 400 });
   }

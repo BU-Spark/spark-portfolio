@@ -18,15 +18,18 @@ const PROJECTS_CACHE_KEY = "spark:admin:projects:v1";
 
 // Every admin destination — rendered as a flat, always-visible grid on the
 // dashboard so nothing (e.g. "Manage admins") is buried only inside a dropdown.
-const ALL_SECTIONS: { label: string; href: string; desc: string }[] = [
+// `superOnly` entries are filtered out for scoped admins, matching AdminRail:
+// /admin/settings and /admin/users are requireSuper at the API, so leaving them
+// linked here would hand a CDS or Spark admin a pair of guaranteed dead ends.
+const ALL_SECTIONS: { label: string; href: string; desc: string; superOnly?: boolean }[] = [
   { label: "Projects", href: "/admin/projects", desc: "Browse & edit the catalog" },
   { label: "People", href: "/admin/people", desc: "Directory & per-semester roles" },
   { label: "Inbox", href: "/admin/inbox", desc: "Triage imported rows" },
   { label: "Media", href: "/admin/uploads", desc: "Review image uploads" },
   { label: "Bulk uploads", href: "/admin/bulk-uploads", desc: "Outreach upload links" },
   { label: "Import CSV", href: "/admin/import", desc: "Bulk data import" },
-  { label: "Settings", href: "/admin/settings", desc: "Taxonomy & facets" },
-  { label: "Manage admins", href: "/admin/users", desc: "Add or remove admins" },
+  { label: "Settings", href: "/admin/settings", desc: "Taxonomy & facets", superOnly: true },
+  { label: "Manage admins", href: "/admin/users", desc: "Add or remove admins", superOnly: true },
 ];
 
 export default function AdminDashboardPage() {
@@ -171,7 +174,7 @@ export default function AdminDashboardPage() {
         <path d="M0 -10 V-6 M0 6 V10 M-10 0 H-6 M6 0 H10 M-7 -7 L-4.2 -4.2 M7 7 L4.2 4.2 M-7 7 L-4.2 4.2 M7 -7 L4.2 -4.2" />
       </>),
     },
-  ];
+  ].filter((s) => s.key !== "settings" || actor?.isSuper);
 
   return (
     <div className="wrap">
@@ -214,7 +217,7 @@ export default function AdminDashboardPage() {
           All sections
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 1, background: "var(--rowsep)" }}>
-          {ALL_SECTIONS.map((s) => (
+          {ALL_SECTIONS.filter((s) => !s.superOnly || actor?.isSuper).map((s) => (
             <Link
               key={s.href}
               href={s.href}

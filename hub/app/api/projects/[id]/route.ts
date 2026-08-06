@@ -168,18 +168,26 @@ export async function PATCH(
   // Ownership transfer is its own super-only operation, deliberately kept OUT of
   // ProjectPatch: that interface is also consumed by the PD importer and the inbox
   // merge path, so an ownership field on it would be a bypass with two existing
-  // callers. Handled before the patch so a rejected transfer changes nothing.
+  // callers.
+  //
+  // Authorized and validated up here so a rejected transfer changes nothing, but
+  // APPLIED last. The two writes share no transaction, so ordering decides which
+  // half can be left stranded: transferring first means a throw in updateProject
+  // leaves the project sitting in its new team with the old field values, a 500
+  // that gives the caller no hint the move landed, and no revalidateTag. Patching
+  // first means the same failure simply leaves ownership untouched.
+  let nextOrg: string | null = null;
   if (body.ownerOrg !== undefined) {
     const sg = await requireSuper();
     if (!sg.ok) return sg.res;
-    const next = String(body.ownerOrg).trim();
-    if (!ORGS.includes(next as never)) {
+    nextOrg = String(body.ownerOrg).trim();
+    if (!ORGS.includes(nextOrg as never)) {
       return Response.json({ error: "Unknown team." }, { status: 400 });
     }
-    await setProjectOwnerOrg(id, next);
   }
 
   await updateProject(id, patch);
+  if (nextOrg) await setProjectOwnerOrg(id, nextOrg);
   revalidateTag("projects");
   return Response.json({ ok: true });
 }

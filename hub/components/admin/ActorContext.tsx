@@ -7,6 +7,8 @@
 // down. Everything here is presentation: what to hide, what to disable, what to
 // badge. It is never a security boundary — the route guards in lib/actor.ts are,
 // and they re-read the DB on every request.
+// Safe to import from a client component: lib/authz.ts imports nothing at all.
+import { ORGS } from "@/lib/authz";
 import { createContext, useContext } from "react";
 
 export interface ClientActor {
@@ -48,5 +50,9 @@ export function orgLabel(org: string | undefined | null): string {
 export function canEditHere(actor: ClientActor | null, ownerOrg: string | undefined): boolean {
   if (!actor) return false;
   if (actor.isSuper) return true;
-  return !!ownerOrg && actor.org === ownerOrg;
+  // The known-org guard mirrors canEdit(). Without it an actor whose org is junk
+  // ("sparkk", "") would get enabled controls for a project whose owner_org is the
+  // same junk, then a 403 on save — the affordance would promise what the server
+  // refuses. Cosmetic either way, but "mirror of canEdit" has to actually be true.
+  return (ORGS as readonly string[]).includes(actor.org) && actor.org === ownerOrg;
 }
