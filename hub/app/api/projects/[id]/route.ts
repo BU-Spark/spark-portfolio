@@ -2,15 +2,19 @@
 //   GET    → full record (incl. admin-only students/teamId) for the edit form
 //   PATCH  → partial update of project-level fields + runs
 //   DELETE → remove the project
-// All require an authenticated admin session.
+// GET is any admin (reads are shared so mis-filed projects get noticed); PATCH and
+// DELETE require the project's owning team. Moving a project between teams is
+// super-only and handled as its own branch, not as a patch field.
 import { revalidateTag } from "next/cache";
-import { auth } from "@/auth";
+import { requireAdmin, requireProject, requireSuper } from "@/lib/actor";
 import {
   getProjectAdmin,
   removeProject,
+  setProjectOwnerOrg,
   updateProject,
   type ProjectPatch,
 } from "@/lib/db";
+import { ORGS } from "@/lib/authz";
 import type { Run } from "@/lib/types";
 import { disciplineFromCourse, SURFACE_KEYS } from "@/lib/data";
 import { publishBlockers } from "@/lib/project";
@@ -19,8 +23,10 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // Any admin: the record carries ownerOrg so the edit form can render itself
+  // read-only for another team's project rather than 403-ing the whole page.
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const { id } = await params;
   const project = await getProjectAdmin(id);
   if (!project) return Response.json({ error: "Not found" }, { status: 404 });
@@ -31,9 +37,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
+  const g = await requireProject(id);
+  if (!g.ok) return g.res;
 
   let body: Record<string, unknown>;
   try {
@@ -76,6 +82,12 @@ export async function PATCH(
     patch.clientDesc = body.clientDesc ? String(body.clientDesc).trim() : null;
   // Which galleries this project surfaces on — whitelist to known keys; never
   // let it be emptied to nothing (default back to Spark so it stays visible).
+  //
+  // Deliberately NOT super-gated. surfaces is visibility, not authority: adding
+  // the other gallery grants that team nothing, since editing is governed by
+  // owner_org. Gating it would force every "show this on /cds too" through a super
+  // admin for no security gain — and cross-tagging is exactly how the existing 23
+  // dual-surface projects came to be.
   if (Array.isArray(body.surfaces)) {
     const s = (body.surfaces as unknown[]).map(String).filter((v) => SURFACE_KEYS.includes(v));
     patch.surfaces = s.length ? [...new Set(s)] : ["spark"];
@@ -153,6 +165,20 @@ export async function PATCH(
     }
   }
 
+  // Ownership transfer is its own super-only operation, deliberately kept OUT of
+  // ProjectPatch: that interface is also consumed by the PD importer and the inbox
+  // merge path, so an ownership field on it would be a bypass with two existing
+  // callers. Handled before the patch so a rejected transfer changes nothing.
+  if (body.ownerOrg !== undefined) {
+    const sg = await requireSuper();
+    if (!sg.ok) return sg.res;
+    const next = String(body.ownerOrg).trim();
+    if (!ORGS.includes(next as never)) {
+      return Response.json({ error: "Unknown team." }, { status: 400 });
+    }
+    await setProjectOwnerOrg(id, next);
+  }
+
   await updateProject(id, patch);
   revalidateTag("projects");
   return Response.json({ ok: true });
@@ -162,9 +188,9 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
+  const g = await requireProject(id);
+  if (!g.ok) return g.res;
   await removeProject(id);
   revalidateTag("projects");
   return Response.json({ ok: true });

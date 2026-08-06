@@ -16,11 +16,11 @@ import type {
   Person,
   Contributor,
 } from "./types";
-import { DEFAULT_GALLERY_SETTINGS, disciplineFromCourse } from "./data";
+import { DEFAULT_GALLERY_SETTINGS, disciplineFromCourse, SURFACE_KEYS } from "./data";
 import { deleteObject } from "./s3";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
-import { ORGS } from "./authz";
+import { ORGS, canEdit, canMerge, type Actor } from "./authz";
 
 // Reuse one pool across hot reloads / warm serverless invocations.
 const globalForPool = globalThis as unknown as { sparkPool?: Pool };
@@ -658,12 +658,17 @@ function mergeRunLists(survivorRuns: Run[], absorbedRuns: Run[]): Run[] {
 // Per-semester data combines automatically (each run keeps its own team); only the
 // project-level scalars in `resolution` were chosen by the admin. Atomic: one
 // transaction, mirroring mergePeople. Returns false if either id is missing.
+export type MergeOutcome =
+  | { ok: true }
+  | { ok: false; reason: "missing" | "cross-org" };
+
 export async function mergeProjects(
   survivorId: string,
   absorbedId: string,
-  resolution: MergeResolution
-): Promise<boolean> {
-  if (survivorId === absorbedId) return false;
+  resolution: MergeResolution,
+  actor: Actor
+): Promise<MergeOutcome> {
+  if (survivorId === absorbedId) return { ok: false, reason: "missing" };
   // Idempotent table guards BEFORE the txn (a missing relation would abort it).
   await ensureContributorsTable();
   await ensurePersonRolesTable();
@@ -676,6 +681,7 @@ export async function mergeProjects(
     tech: string[] | null; images: string[] | null;
     repo_url: string | null; prod_url: string | null; drive_url: string | null;
     tech_note: string | null; featured: boolean; published: boolean; runs: Run[] | null;
+    surfaces: string[] | null; owner_org: string | null;
   };
 
   const nz = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
@@ -686,7 +692,7 @@ export async function mergeProjects(
     const { rows } = await client.query<RawRow>(
       `SELECT id, title, blurb, blurb_term, blurb_locked, partner, client_type,
               contact, contacts, tech, images, repo_url, prod_url, drive_url,
-              tech_note, featured, published, runs
+              tech_note, featured, published, runs, surfaces, owner_org
          FROM projects WHERE id = ANY($1)`,
       [[survivorId, absorbedId]]
     );
@@ -694,7 +700,24 @@ export async function mergeProjects(
     const absorbed = rows.find((r) => r.id === absorbedId);
     if (!survivor || !absorbed) {
       await client.query("ROLLBACK");
-      return false;
+      return { ok: false, reason: "missing" };
+    }
+
+    // Two-sided authority check, deliberately INSIDE the transaction and against
+    // the rows we just SELECTed. The route also guards, but only this check is
+    // race-free: a pre-check via getProjectAdmin reads outside the txn and could be
+    // invalidated by a concurrent ownership reassignment before the UPDATE lands.
+    // A merge deletes the absorbed project, so a one-sided check would let a scoped
+    // admin destroy the other team's record.
+    if (
+      !canMerge(
+        actor,
+        survivor.owner_org ?? "spark",
+        absorbed.owner_org ?? "spark"
+      )
+    ) {
+      await client.query("ROLLBACK");
+      return { ok: false, reason: "cross-org" };
     }
 
     // Scalars: resolution wins; else the populated side (survivor on tie).
@@ -735,15 +758,32 @@ export async function mergeProjects(
     // images: survivor first, dedupe, cap at the 4-slot limit (bare keys).
     const images = [...new Set([...(survivor.images ?? []), ...(absorbed.images ?? [])])].slice(0, 4);
 
+    // surfaces UNION. Previously `surfaces` was simply absent from the UPDATE
+    // below, so a merge silently dropped the absorbed project's gallery
+    // membership. Union rather than survivor-wins: a merge is a record-keeping
+    // operation and must not remove a project from a gallery someone deliberately
+    // put it in. Safe because surfaces grants no authority — owner_org does.
+    // Never emptied, mirroring the fallback in PATCH /api/projects/[id].
+    const surfaces = [
+      ...new Set([...(survivor.surfaces ?? []), ...(absorbed.surfaces ?? [])]),
+    ].filter((s) => SURFACE_KEYS.includes(s));
+
+    // owner_org is NOT merged: the surviving record keeps its own owner. Union is
+    // meaningless for a single-valued authority field, and "the survivor keeps its
+    // owner" is the only rule that needs no explanation later. Deliberately absent
+    // from MergeResolution so the merge modal can never become a covert
+    // ownership-transfer path — that's setProjectOwnerOrg, which is super-only.
     await client.query(
       `UPDATE projects SET
          title=$1, blurb=$2, blurb_term=$3, blurb_locked=$4, partner=$5, client_type=$6,
          contact=$7, contacts=$8::jsonb, tech=$9, images=$10, repo_url=$11, prod_url=$12,
-         drive_url=$13, tech_note=$14, featured=$15, published=$16, runs=$17::jsonb
+         drive_url=$13, tech_note=$14, featured=$15, published=$16, runs=$17::jsonb,
+         surfaces=$19
        WHERE id=$18`,
       [title, blurb, blurbTerm, blurbLocked, partner, clientType, contact,
        JSON.stringify(contacts), tech, images, repoUrl, prodUrl, driveUrl, techNote,
-       featured, published, JSON.stringify(runs), survivorId]
+       featured, published, JSON.stringify(runs), survivorId,
+       surfaces.length ? surfaces : ["spark"]]
     );
 
     // Re-point per-semester satellites to the survivor.
@@ -795,7 +835,7 @@ export async function mergeProjects(
         try { await deleteObject(k); } catch { /* orphan tolerated, mirrors removeProject */ }
       }
     }
-    return true;
+    return { ok: true };
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;
@@ -811,10 +851,6 @@ export async function getBlurbTermMap(): Promise<Map<string, string | null>> {
     `SELECT id, blurb_term FROM projects`
   );
   return new Map(rows.map((r) => [r.id, r.blurb_term]));
-}
-
-export async function clearCustomProjects(): Promise<void> {
-  await query(`DELETE FROM projects WHERE custom = true`);
 }
 
 // --- Ingestion reconciliation: import inbox + DB-backed aliases ---------------
@@ -1054,14 +1090,28 @@ const toInboxRow = (r: InboxDbRow): InboxRow => ({
   lastSeen: r.last_seen,
 });
 
+// Scoped to the actor's org unless they're a super admin. Necessary regardless of
+// ownership: inbox rows carry team-role names, which are admin-only PII belonging
+// to whichever team's tracker produced them.
 export async function listInbox(
-  status: "pending" | "dismissed" | "all" = "pending"
+  status: "pending" | "dismissed" | "all" = "pending",
+  actor?: Actor
 ): Promise<InboxRow[]> {
   await ensureIngestTables();
-  const where = status === "all" ? "" : "WHERE status = $1";
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (status !== "all") {
+    params.push(status);
+    clauses.push(`status = $${params.length}`);
+  }
+  if (actor && !actor.isSuper) {
+    params.push(actor.org);
+    clauses.push(`org = $${params.length}`);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await query<InboxDbRow>(
     `SELECT * FROM import_inbox ${where} ORDER BY seen_count DESC, last_seen DESC`,
-    status === "all" ? [] : [status]
+    params
   );
   return rows.map(toInboxRow);
 }
@@ -1074,9 +1124,18 @@ export async function countInbox(): Promise<number> {
   return Number(rows[0]?.n ?? 0);
 }
 
-export async function dismissInboxRow(id: number): Promise<void> {
+// Status flips are org-scoped: the row's team-role names are the other team's
+// admin-only PII, so a scoped admin must not be able to hide or resurface them.
+// The org predicate is in the WHERE clause so the check can't race a concurrent
+// change, and a no-op UPDATE is reported as `false`.
+export async function dismissInboxRow(id: number, actor: Actor): Promise<boolean> {
   await ensureIngestTables();
-  await query(`UPDATE import_inbox SET status = 'dismissed', last_seen = now() WHERE id = $1`, [id]);
+  const rows = await query<{ id: string }>(
+    `UPDATE import_inbox SET status = 'dismissed', last_seen = now()
+      WHERE id = $1 AND ($3 OR org = $2) RETURNING id`,
+    [id, actor.org, actor.isSuper]
+  );
+  return rows.length > 0;
 }
 
 async function getInboxRow(id: number): Promise<InboxRow | null> {
@@ -1129,9 +1188,17 @@ async function inboxRoleRunFields(roles: InboxRoles | undefined): Promise<Partia
 // the admin edits/publishes via the normal edit form. The new title === rawName,
 // so matchKey(title) === the row's name_key → future syncs match it directly
 // (no alias needed). Returns the new project id.
-export async function createProjectFromInbox(id: number): Promise<string | null> {
+export async function createProjectFromInbox(
+  id: number,
+  actor: Actor
+): Promise<string | null | "forbidden"> {
   const row = await getInboxRow(id);
   if (!row) return null;
+  // The new project is owned by whichever team's FEED produced the row — never by
+  // whoever happens to be triaging. Deriving ownership from the actor would let a
+  // CDS admin turn a Spark-sourced row into a CDS-owned project, which is the same
+  // identity laundering the importer fix closed, one step later.
+  if (!canEdit(actor, row.org)) return "forbidden";
   const projectId = await uniqueProjectId(row.rawName);
   // Roles + PD link are per-semester — embed them on the run for this row's term.
   const roleFields = await inboxRoleRunFields(row.roles);
@@ -1159,6 +1226,7 @@ export async function createProjectFromInbox(id: number): Promise<string | null>
     repoUrl: row.repoUrl,
     published: !!(row.blurb && row.blurb.trim()), // auto-publish when blurb present; stay draft otherwise
     custom: false,
+    ownerOrg: row.org, // addProject derives surfaces from this
   });
   // addProject doesn't carry tech_note / blurb_term — apply via patch.
   const patch: ProjectPatch = {};
@@ -1173,11 +1241,23 @@ export async function createProjectFromInbox(id: number): Promise<string | null>
 // (so the tracker name auto-matches next sync) and applies the row's payload to
 // the project (fill-not-clobber, same rules as the importer), then removes the
 // row. Returns false if either side is missing.
-export async function mergeInboxRow(id: number, projectId: string): Promise<boolean> {
+export async function mergeInboxRow(
+  id: number,
+  projectId: string,
+  actor: Actor
+): Promise<boolean | "forbidden"> {
   const row = await getInboxRow(id);
   if (!row) return false;
   const target = await getProjectAdmin(projectId);
   if (!target) return false;
+
+  // BOTH sides, and checked BEFORE addAlias below. Ordering is load-bearing: the
+  // alias is durable, and one pointing at the other team's project would make every
+  // FUTURE sync match it, permanently defeating the importer's org pre-filter. A
+  // late check would leave that alias behind even on a rejected merge.
+  if (!canEdit(actor, row.org) || !canEdit(actor, target.ownerOrg ?? "spark")) {
+    return "forbidden";
+  }
 
   await addAlias(row.nameKey, projectId);
 
@@ -1209,9 +1289,14 @@ export async function mergeInboxRow(id: number, projectId: string): Promise<bool
   return true;
 }
 
-export async function restoreInboxRow(id: number): Promise<void> {
+export async function restoreInboxRow(id: number, actor: Actor): Promise<boolean> {
   await ensureIngestTables();
-  await query(`UPDATE import_inbox SET status = 'pending', last_seen = now() WHERE id = $1`, [id]);
+  const rows = await query<{ id: string }>(
+    `UPDATE import_inbox SET status = 'pending', last_seen = now()
+      WHERE id = $1 AND ($3 OR org = $2) RETURNING id`,
+    [id, actor.org, actor.isSuper]
+  );
+  return rows.length > 0;
 }
 
 export async function listAliases(): Promise<{ nameKey: string; projectId: string; createdAt: string }[]> {
@@ -1222,9 +1307,19 @@ export async function listAliases(): Promise<{ nameKey: string; projectId: strin
   return rows.map((r) => ({ nameKey: r.name_key, projectId: r.project_id, createdAt: r.created_at }));
 }
 
-export async function removeAlias(nameKey: string): Promise<void> {
+// Scoped by the OWNER of the project the alias resolves to: deleting it changes
+// what that team's next PD sync will match, so it is their data even though the
+// row itself carries no org. Returns false when the alias is absent or foreign.
+export async function removeAlias(nameKey: string, actor: Actor): Promise<boolean> {
   await ensureIngestTables();
-  await query(`DELETE FROM project_aliases WHERE name_key = $1`, [nameKey]);
+  const rows = await query<{ name_key: string }>(
+    `DELETE FROM project_aliases a
+      USING projects p
+      WHERE a.name_key = $1 AND p.id = a.project_id AND ($3 OR p.owner_org = $2)
+      RETURNING a.name_key`,
+    [nameKey, actor.org, actor.isSuper]
+  );
+  return rows.length > 0;
 }
 
 // --- Student contributors (ADMIN-ONLY) ---------------------------------------
@@ -2223,19 +2318,34 @@ export async function submitUploadRequest(token: string): Promise<boolean> {
 
 // Admin queue. Joins the project title + its current images (raw keys) so the
 // review UI can offer the full union (existing ∪ pending) to choose from.
+// Org-filtered: the queue exposes external recipient emails, and it is a WORKLIST
+// — rows you cannot act on are noise, unlike the projects list where cross-org
+// visibility exists so mis-filed projects get noticed. The JOIN on projects was
+// already here, so the predicate is free.
 export async function listUploadRequests(
-  status?: UploadRequestStatus
+  status?: UploadRequestStatus,
+  actor?: Actor
 ): Promise<UploadRequest[]> {
   await ensureUploadRequestsTable();
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (status) {
+    params.push(status);
+    clauses.push(`u.status = $${params.length}`);
+  }
+  if (actor && !actor.isSuper) {
+    params.push(actor.org);
+    clauses.push(`p.owner_org = $${params.length}`);
+  }
   const rows = await query<UploadReqRow>(
     `SELECT u.token, u.project_id, u.recipient, u.status, u.images,
             u.created_at, u.expires_at, u.submitted_at, u.review_note,
             p.title AS project_title, p.images AS project_images
        FROM upload_requests u
        JOIN projects p ON p.id = u.project_id
-      ${status ? "WHERE u.status = $1" : ""}
+      ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
       ORDER BY u.submitted_at DESC NULLS LAST, u.created_at DESC`,
-    status ? [status] : []
+    params
   );
   return rows.map((r) => ({
     ...rowToUploadRequest(r),
@@ -2259,10 +2369,22 @@ export async function listProjectUploadRequests(
   return rows.map(rowToUploadRequest);
 }
 
+// Org-scoped to match listUploadRequests — otherwise the rail badge counts work
+// the admin cannot see or act on.
 export async function countUploadRequests(
-  status: UploadRequestStatus
+  status: UploadRequestStatus,
+  actor?: Actor
 ): Promise<number> {
   await ensureUploadRequestsTable();
+  if (actor && !actor.isSuper) {
+    const rows = await query<{ n: number }>(
+      `SELECT count(*)::int AS n
+         FROM upload_requests u JOIN projects p ON p.id = u.project_id
+        WHERE u.status = $1 AND p.owner_org = $2`,
+      [status, actor.org]
+    );
+    return rows[0]?.n ?? 0;
+  }
   const rows = await query<{ n: number }>(
     `SELECT count(*)::int AS n FROM upload_requests WHERE status = $1`,
     [status]
@@ -2275,17 +2397,21 @@ export async function countUploadRequests(
 // pending uploads (blocks arbitrary-key injection), caps at 4, and cleans up the
 // request's leftover (un-kept) pending objects from S3. Idempotent via the
 // status guard. Returns an error string on validation failure.
+// Promoting a contributor's pending images onto the project is a WRITE to that
+// project, so it is org-scoped. The gate lives in the SELECT that was already
+// joining projects — a foreign token simply finds no row and gets the existing
+// "not found" message, which leaks nothing about whose project it is.
 export async function approveUploadRequest(
   token: string,
   finalKeys: string[],
-  adminEmail: string
+  actor: Actor
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   await ensureUploadRequestsTable();
   const rows = await query<{ project_id: string; images: string[]; project_images: string[] }>(
     `SELECT u.project_id, u.images, p.images AS project_images
        FROM upload_requests u JOIN projects p ON p.id = u.project_id
-      WHERE u.token = $1 AND u.status = 'submitted'`,
-    [token]
+      WHERE u.token = $1 AND u.status = 'submitted' AND ($3 OR p.owner_org = $2)`,
+    [token, actor.org, actor.isSuper]
   );
   const req = rows[0];
   if (!req) return { ok: false, error: "Request not found or not awaiting review." };
@@ -2301,7 +2427,7 @@ export async function approveUploadRequest(
     `UPDATE upload_requests
        SET status = 'approved', reviewed_at = now(), reviewed_by = $2
      WHERE token = $1`,
-    [token, adminEmail]
+    [token, actor.email]
   );
   // Clean up this request's pending objects that didn't make the final cut.
   const kept = new Set(keys);
@@ -2313,19 +2439,25 @@ export async function approveUploadRequest(
 
 // Reject: send a submitted request back to 'open' with an optional note shown to
 // the PM, so the same link lets them fix and resubmit within the 14-day window.
+// NOTE: unlike approveUploadRequest, this never joined `projects`, so the org
+// predicate needs an explicit subquery rather than an extra AND. Easy to miss by
+// assuming the approve/reject pair are symmetric — they are not.
 export async function rejectUploadRequest(
   token: string,
-  adminEmail: string,
+  actor: Actor,
   note: string | null
 ): Promise<boolean> {
   await ensureUploadRequestsTable();
   const rows = await query<{ token: string }>(
-    `UPDATE upload_requests
+    `UPDATE upload_requests u
        SET status = 'open', submitted_at = NULL,
            reviewed_at = now(), reviewed_by = $2, review_note = $3
-     WHERE token = $1 AND status = 'submitted'
-     RETURNING token`,
-    [token, adminEmail, note]
+     WHERE u.token = $1 AND u.status = 'submitted'
+       AND ($5 OR EXISTS (
+             SELECT 1 FROM projects p
+              WHERE p.id = u.project_id AND p.owner_org = $4))
+     RETURNING u.token`,
+    [token, actor.email, note, actor.org, actor.isSuper]
   );
   return rows.length > 0;
 }

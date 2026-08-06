@@ -3,12 +3,10 @@
 // deleted; per-semester data (runs/roles/PD, contributors, role timeline) combines
 // automatically. Requires an authenticated admin session.
 import { revalidateTag } from "next/cache";
-import { auth } from "@/auth";
+import { requireProjects } from "@/lib/actor";
 import { mergeProjects, type MergeResolution } from "@/lib/db";
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   let body: Record<string, unknown>;
   try {
@@ -25,6 +23,14 @@ export async function POST(req: Request) {
   if (survivorId === absorbedId) {
     return Response.json({ error: "Cannot merge a project into itself" }, { status: 400 });
   }
+
+  // Two-sided guard, AFTER the body parse so the 400s above still fire first.
+  // This is fast feedback for the UI; the authoritative check runs inside
+  // mergeProjects' transaction, where it can't race an ownership reassignment.
+  // Because both ids must be writable, "cross-org merges are super-only" needs no
+  // separate rule.
+  const g = await requireProjects([survivorId, absorbedId]);
+  if (!g.ok) return g.res;
 
   // Coerce the resolution — never trust the body blindly. Strings trimmed (empty →
   // null for nullable fields), booleans type-guarded. Anything omitted is left
@@ -48,8 +54,16 @@ export async function POST(req: Request) {
     published: bool("published"),
   };
 
-  const ok = await mergeProjects(survivorId, absorbedId, resolution);
-  if (!ok) {
+  const result = await mergeProjects(survivorId, absorbedId, resolution, g.actor);
+  if (!result.ok) {
+    // cross-org can still surface here even though the route guarded: the in-txn
+    // check is the one that sees a concurrent reassignment.
+    if (result.reason === "cross-org") {
+      return Response.json(
+        { error: "These projects belong to different teams — a super admin must merge them." },
+        { status: 403 }
+      );
+    }
     return Response.json({ error: "Merge failed — one of the projects no longer exists." }, { status: 409 });
   }
 

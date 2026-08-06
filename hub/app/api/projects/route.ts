@@ -3,7 +3,7 @@
 //   POST → create a project from the admin form
 // Both require an authenticated admin session.
 import { revalidateTag } from "next/cache";
-import { auth } from "@/auth";
+import { requireAdmin } from "@/lib/actor";
 import {
   addProject,
   getProjectsForList,
@@ -20,16 +20,16 @@ function slugify(s: string): string {
 }
 
 export async function GET() {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   // Admin list projection — includes admin-only fields (team roles) for filtering.
   const projects = await getProjectsForList();
   return Response.json({ total: projects.length, projects });
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: Record<string, unknown>;
   try {
@@ -107,6 +107,11 @@ export async function POST(req: Request) {
     featured: false,
     published: typeof body.published === "boolean" ? body.published : true,
     custom: true,
+    // Ownership comes from the signed-in admin, NEVER from the request. A
+    // client-supplied owner_org would let anyone create projects owned by the
+    // other team. addProject also derives `surfaces` from this, so a CDS admin's
+    // project lands in the CDS gallery rather than defaulting to Spark's.
+    ownerOrg: g.actor.org,
   };
 
   await addProject(project);

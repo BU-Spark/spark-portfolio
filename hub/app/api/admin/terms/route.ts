@@ -1,11 +1,11 @@
-import { auth } from "@/auth";
+import { requireAdmin } from "@/lib/actor";
 import { getDistinctTerms } from "@/lib/db";
 import { SPARK_TERMS } from "@/lib/data";
 import { semesterRank } from "@/lib/semester";
 
 export async function GET() {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const dbTerms = await getDistinctTerms();
   // Merge SPARK_TERMS as a floor so future semesters (not yet in the DB) are
   // always selectable when creating the first project of a new term.
