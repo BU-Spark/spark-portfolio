@@ -24,6 +24,7 @@ const PROJECTS_CACHE_KEY = "spark:admin:projects:v1";
 const ALL_SECTIONS: { label: string; href: string; desc: string; superOnly?: boolean }[] = [
   { label: "Projects", href: "/admin/projects", desc: "Browse & edit the catalog" },
   { label: "People", href: "/admin/people", desc: "Directory & per-semester roles" },
+  { label: "Approvals", href: "/admin/approvals", desc: "Everything waiting on you" },
   { label: "Inbox", href: "/admin/inbox", desc: "Triage imported rows" },
   { label: "Media", href: "/admin/uploads", desc: "Review image uploads" },
   { label: "Bulk uploads", href: "/admin/bulk-uploads", desc: "Outreach upload links" },

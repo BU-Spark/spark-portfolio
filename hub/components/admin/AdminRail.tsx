@@ -14,7 +14,8 @@ import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 
 type IconName =
-  | "command" | "projects" | "people" | "inbox" | "media" | "bulk" | "import" | "admins" | "settings";
+  | "command" | "projects" | "people" | "inbox" | "media" | "bulk" | "import" | "admins"
+  | "settings" | "approvals";
 
 // Minimal stroke icons (24×24 viewBox; CSS sizes them to 17px).
 function Icon({ name }: { name: IconName }) {
@@ -40,6 +41,8 @@ function Icon({ name }: { name: IconName }) {
       return <svg {...common}>{p("M12 3v12")}{p("M8 11l4 4 4-4")}{p("M4 19h16")}</svg>;
     case "admins":
       return <svg {...common}><circle cx="12" cy="8" r="3.4" />{p("M5.5 20a6.5 6.5 0 0 1 13 0")}</svg>;
+    case "approvals":
+      return <svg {...common}>{p("M20 6L9 17l-5-5")}</svg>;
     case "settings":
       return <svg {...common}><circle cx="12" cy="12" r="3.2" />{p("M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1l2.1-2.1M17 7l2.1-2.1")}</svg>;
   }
@@ -50,14 +53,18 @@ interface NavItem { href: string; label: string; icon: IconName; exact?: boolean
 export default function AdminRail() {
   const pathname = usePathname() || "";
   const [inboxCount, setInboxCount] = useState(0);
+  const [approvalCount, setApprovalCount] = useState(0);
   const actor = useActor();
 
   useEffect(() => {
     const ac = new AbortController();
-    // The count is already org-scoped server-side, so the badge only ever shows
-    // rows this admin can actually triage.
+    // Both counts are already org-scoped server-side, so the badges only ever show
+    // rows this admin can actually act on.
     fetch("/api/inbox", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (d?.count != null) setInboxCount(d.count);
+    }).catch(() => {});
+    fetch("/api/approvals", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (Array.isArray(d?.items)) setApprovalCount(d.items.length);
     }).catch(() => {});
     return () => ac.abort();
   }, []);
@@ -72,6 +79,7 @@ export default function AdminRail() {
       { href: "/admin/people", label: "People", icon: "people" },
     ]},
     { title: "Pipeline", items: [
+      { href: "/admin/approvals", label: "Approvals", icon: "approvals", badge: approvalCount },
       { href: "/admin/inbox", label: "Import inbox", icon: "inbox", badge: inboxCount },
       { href: "/admin/import", label: "Import CSV", icon: "import" },
       { href: "/admin/uploads", label: "Uploads", icon: "media" },

@@ -1,0 +1,75 @@
+# Posts the weekly approvals digest to Slack.
+#
+# Why GitHub Actions and not a Cloudflare cron trigger: a Worker cron requires the
+# deployed script to export a `scheduled` handler, and @opennextjs/cloudflare emits a
+# fetch-only worker — adding one means a custom entrypoint plus new wrangler config.
+# This needs no Cloudflare changes at all and is one curl to test.
+#
+# The route itself decides whether to post: it stays silent when nothing is waiting
+# on a person, so a quiet week produces a successful run with `sent: false` rather
+# than a noisy Slack message.
+#
+# SECURITY: no `github.event.*` data is referenced anywhere in this workflow, so
+# there is no workflow-injection surface. The only interpolations are repository
+# secrets and one typed boolean input, and each is passed via `env:` rather than
+# inlined into a `run:` script.
+#
+# Required repository secrets:
+#   DIGEST_URL    e.g. https://hub.buspark.io/api/digest/weekly
+#   DIGEST_TOKEN  must match the DIGEST_TOKEN set on the Worker
+name: Weekly approvals digest
+
+on:
+  schedule:
+    # 13:00 UTC Monday — 09:00 America/New_York during EDT, 08:00 during EST.
+    # GitHub cron has no timezone support, so the local hour shifts with DST; an hour
+    # either way is immaterial for a weekly digest.
+    - cron: "0 13 * * 1"
+  # Manual runs for testing. `dry` renders the message without posting to Slack or
+  # recording a snapshot, so it can't disturb next week's deltas.
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Render only, do not post to Slack"
+        type: boolean
+        default: false
+
+# No checkout, so no repository contents are needed.
+permissions: {}
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post digest
+        env:
+          DIGEST_URL: ${{ secrets.DIGEST_URL }}
+          DIGEST_TOKEN: ${{ secrets.DIGEST_TOKEN }}
+          DRY: ${{ inputs.dry && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST_URL:-}" ] || [ -z "${DIGEST_TOKEN:-}" ]; then
+            echo "::error::DIGEST_URL and DIGEST_TOKEN repository secrets must be set."
+            exit 1
+          fi
+
+          url="$DIGEST_URL"
+          if [ "$DRY" = "1" ]; then url="${url}?dry=1"; fi
+
+          # -sS stays quiet but still reports transport errors; the status code is
+          # captured separately so a 4xx/5xx fails the job loudly instead of being
+          # swallowed by a 200-shaped empty body.
+          code=$(curl -sS -o response.json -w '%{http_code}' \
+                   -X POST "$url" \
+                   -H "Authorization: Bearer $DIGEST_TOKEN" \
+                   -H 'Content-Length: 0')
+
+          echo "HTTP $code"
+          # The token travels in the header, never the body, so echoing the response
+          # cannot leak it.
+          cat response.json; echo
+
+          if [ "$code" != "200" ]; then
+            echo "::error::Digest endpoint returned HTTP $code"
+            exit 1
+          fi

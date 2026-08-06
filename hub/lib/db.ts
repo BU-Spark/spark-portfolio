@@ -2506,3 +2506,190 @@ export async function rejectUploadRequest(
   );
   return rows.length > 0;
 }
+
+// --- Escalation queue + weekly digest ---------------------------------------
+// One list of everything currently waiting on a human, plus the standing
+// data-quality backlog. Both live here rather than in a lib/approvals.ts because
+// the lazy-DDL helpers (ensureIngestTables, ensureUploadRequestsTable) are
+// module-private, and a fresh database would otherwise query tables that don't
+// exist yet.
+
+/** What kind of stall an approval item represents. Drives the page's grouping. */
+export type ApprovalKind = "screenshots" | "nudge" | "inbox" | "draft";
+
+export interface ApprovalItem {
+  kind: ApprovalKind;
+  /** Token, inbox id, or project id — whatever identifies the thing to act on. */
+  ref: string;
+  title: string;
+  /** Short "what's stuck / who's it on" line. */
+  detail: string;
+  org: string;
+  /** ISO timestamp this became someone's problem. */
+  waitingSince: string;
+}
+
+/**
+ * Everything waiting on a person, oldest first.
+ *
+ * Scoped to the actor's team (supers see all). Unlike the projects list — where
+ * foreign rows stay visible so a mis-filed project is noticeable — a worklist must
+ * only contain rows you can act on, matching listUploadRequests.
+ *
+ * One round trip: the four sources are UNION ALLed so the ordering is done once, in
+ * SQL, rather than merged and re-sorted per source in JS.
+ */
+export async function listOpenApprovals(scope: {
+  org: string;
+  isSuper: boolean;
+}): Promise<ApprovalItem[]> {
+  await ensureIngestTables();
+  await ensureUploadRequestsTable();
+  const rows = await query<{
+    kind: ApprovalKind;
+    ref: string;
+    title: string;
+    detail: string;
+    org: string;
+    waiting_since: string;
+  }>(
+    `SELECT kind, ref, title, detail, org, waiting_since FROM (
+       -- A PM delivered screenshots; an admin has to approve or reject them.
+       SELECT 'screenshots'::text AS kind, u.token AS ref, p.title,
+              coalesce(u.recipient, 'someone') || ' sent '
+                || coalesce(array_length(u.images, 1), 0)::text || ' image(s)' AS detail,
+              p.owner_org AS org, coalesce(u.submitted_at, u.created_at) AS waiting_since
+         FROM upload_requests u JOIN projects p ON p.id = u.project_id
+        WHERE u.status = 'submitted' AND ($1 OR p.owner_org = $2)
+
+       UNION ALL
+       -- Link sent, nothing delivered, and it expires soon. The escalation case:
+       -- silence here looks identical to "not asked yet" unless it's surfaced.
+       SELECT 'nudge', u.token, p.title,
+              'No upload yet from ' || coalesce(u.recipient, 'the recipient')
+                || ' — link expires ' || to_char(u.expires_at, 'Mon DD'),
+              p.owner_org, u.created_at
+         FROM upload_requests u JOIN projects p ON p.id = u.project_id
+        WHERE u.status = 'open' AND u.expires_at > now()
+          AND u.created_at < now() - interval '7 days'
+          AND ($1 OR p.owner_org = $2)
+
+       UNION ALL
+       -- Tracker rows the importer could not match to a project.
+       SELECT 'inbox', i.id::text, i.raw_name,
+              'Seen ' || i.seen_count::text || '× in the '
+                || coalesce(nullif(btrim(i.term), ''), 'tracker') || ' feed',
+              i.org, i.first_seen
+         FROM import_inbox i
+        WHERE i.status = 'pending' AND ($1 OR i.org = $2)
+
+       UNION ALL
+       -- Unpublished projects. Split on whether they'd publish right now, because
+       -- "click publish" and "go find a description" are different jobs. Mirrors
+       -- publishBlockers() in lib/project.ts — keep the two in step.
+       SELECT 'draft', p.id, p.title,
+              CASE WHEN coalesce(btrim(p.blurb), '') <> '' AND EXISTS (
+                     SELECT 1 FROM jsonb_array_elements(p.runs) r
+                      WHERE coalesce(btrim(r->>'term'), '') <> ''
+                        AND coalesce(btrim(r->>'course'), '') <> '')
+                   THEN 'Ready to publish — nothing blocking it'
+                   ELSE 'Blocked: needs '
+                        || concat_ws(' and ',
+                             nullif(CASE WHEN coalesce(btrim(p.blurb), '') = ''
+                                         THEN 'a description' END, ''),
+                             nullif(CASE WHEN NOT EXISTS (
+                                      SELECT 1 FROM jsonb_array_elements(p.runs) r
+                                       WHERE coalesce(btrim(r->>'term'), '') <> ''
+                                         AND coalesce(btrim(r->>'course'), '') <> '')
+                                         THEN 'a course & term' END, ''))
+              END,
+              p.owner_org, p.created_at
+         FROM projects p
+        WHERE p.published = false AND ($1 OR p.owner_org = $2)
+     ) q
+     ORDER BY waiting_since ASC`,
+    [scope.isSuper, scope.org]
+  );
+  return rows.map((r) => ({
+    kind: r.kind,
+    ref: r.ref,
+    title: r.title,
+    detail: r.detail,
+    org: r.org,
+    waitingSince: new Date(r.waiting_since).toISOString(),
+  }));
+}
+
+/**
+ * Standing data-quality counts, keyed by the same labels missingInfo() produces so
+ * the digest and the projects-list gap chips can't disagree about what a gap is.
+ *
+ * Deliberately separate from listOpenApprovals: these are conditions, not queued
+ * work. Nothing is "waiting" on a missing tech stack — 100% of the catalog has no
+ * images today — so mixing them into the queue would bury the actionable rows.
+ */
+export async function backlogCounts(scope: {
+  org: string;
+  isSuper: boolean;
+}): Promise<Record<string, number>> {
+  const rows = await query<{ label: string; n: number }>(
+    `SELECT 'Description' AS label, count(*)::int AS n FROM projects
+       WHERE ($1 OR owner_org = $2) AND coalesce(btrim(blurb), '') = ''
+     UNION ALL SELECT 'GitHub repo', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2) AND coalesce(btrim(repo_url), '') = ''
+     UNION ALL SELECT 'Images', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2)
+         AND coalesce(array_length(array_remove(images, NULL), 1), 0) = 0
+     UNION ALL SELECT 'Tech stack', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2) AND coalesce(array_length(tech, 1), 0) = 0
+     UNION ALL SELECT 'PD link', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2) AND coalesce(btrim(pd_url), '') = ''
+     UNION ALL SELECT 'Contributors', count(*)::int FROM projects p
+       WHERE ($1 OR p.owner_org = $2)
+         AND NOT EXISTS (SELECT 1 FROM contributors c WHERE c.project_id = p.id)`,
+    [scope.isSuper, scope.org]
+  );
+  return Object.fromEntries(rows.map((r) => [r.label, r.n]));
+}
+
+let digestEnsured = false;
+async function ensureDigestTable(): Promise<void> {
+  if (digestEnsured) return;
+  await query(
+    `CREATE TABLE IF NOT EXISTS digest_snapshots (
+       id      bigserial PRIMARY KEY,
+       org     text NOT NULL,
+       counts  jsonb NOT NULL,
+       sent_at timestamptz NOT NULL DEFAULT now()
+     )`
+  );
+  digestEnsured = true;
+}
+
+/**
+ * The previous run's backlog counts for this org, or null on the first ever run.
+ *
+ * The whole reason this table exists: absolute counts alone make the digest
+ * byte-identical week after week (26 no-repo, 52 no-tech, 170 no-images) until
+ * someone does bulk data work, which is how a digest earns a mute. A delta at least
+ * distinguishes "nothing moved" from "nobody looked".
+ */
+export async function lastDigestCounts(org: string): Promise<Record<string, number> | null> {
+  await ensureDigestTable();
+  const rows = await query<{ counts: Record<string, number> }>(
+    `SELECT counts FROM digest_snapshots WHERE org = $1 ORDER BY sent_at DESC LIMIT 1`,
+    [org]
+  );
+  return rows[0]?.counts ?? null;
+}
+
+export async function saveDigestCounts(
+  org: string,
+  counts: Record<string, number>
+): Promise<void> {
+  await ensureDigestTable();
+  await query(`INSERT INTO digest_snapshots (org, counts) VALUES ($1, $2)`, [
+    org,
+    JSON.stringify(counts),
+  ]);
+}
