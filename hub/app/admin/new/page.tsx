@@ -20,6 +20,7 @@ import { primaryDiscipline, latestTerm, missingInfo } from "@/lib/project";
 import type { Project, ProjectContact } from "@/lib/types";
 import ContactsEditor from "@/components/admin/ContactsEditor";
 import PageHeader from "@/components/admin/PageHeader";
+import { useActor, orgLabel } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
 
 // Session cache of the admin project list for instant repeat-visit paints.
@@ -105,6 +106,7 @@ const BLANK: FormState = {
 };
 
 export default function AddProjectPage() {
+  const actor = useActor();
   const [form, setForm] = useState<FormState>(BLANK);
   const { toastEl, notify } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -268,6 +270,12 @@ export default function AddProjectPage() {
     <>
       {toastEl}
       <PageHeader eyebrow="Catalog / Create" title="Add a project">
+        {/* Read-only: ownership is set server-side from the session, never from this
+            form, so a client can't create a project owned by the other team. It's
+            shown because it also decides which gallery the project starts on. */}
+        <span className="badge" title="New projects are owned by your team">
+          Creating as {actor?.isSuper ? `super admin (${orgLabel(actor.org)})` : orgLabel(actor?.org)}
+        </span>
         <Link href="/admin/projects" className="btn btn-ghost">
           Cancel
         </Link>

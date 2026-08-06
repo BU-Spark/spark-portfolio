@@ -24,6 +24,7 @@ import ContactsEditor from "@/components/admin/ContactsEditor";
 import { useToast } from "@/components/admin/useToast";
 import { useUnsavedGuard } from "@/components/admin/useUnsavedGuard";
 import { useHotkey } from "@/components/admin/useHotkey";
+import { useActor, orgLabel, canEditHere } from "@/components/admin/ActorContext";
 
 const ACCENT = "var(--teal-deep)";
 
@@ -145,6 +146,9 @@ function urlOk(v: string): boolean {
 }
 
 interface EditState {
+  /** Owning team of the loaded project — decides read-only vs editable, and is
+   *  only ever *changed* by a super admin (see the "Owning team" control). */
+  ownerOrg: string;
   title: string;
   blurb: string;
   partner: string;
@@ -367,10 +371,15 @@ export default function EditProjectPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const actor = useActor();
 
   const { toastEl, notify } = useToast();
 
   const [form, setForm] = useState<EditState | null>(null);
+  // Another team's project loads fine (reads are shared so mis-filing is visible)
+  // but renders locked. The API enforces the same thing; this only avoids offering
+  // an edit that would 403 on save.
+  const readOnly = !!form && !canEditHere(actor, form.ownerOrg);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -525,6 +534,7 @@ export default function EditProjectPage() {
         featured: !!project.featured,
         published: project.published !== false,
         surfaces: project.surfaces?.length ? project.surfaces : ["spark"],
+        ownerOrg: project.ownerOrg ?? "spark",
         runs: project.runs.length
           ? project.runs.map((r) => ({
               term: r.term ?? "",
@@ -723,6 +733,10 @@ export default function EditProjectPage() {
       featured: form.featured,
       published: form.published,
       surfaces: form.surfaces,
+      // Sent ONLY by a super admin. For everyone else the key is absent, so the
+      // route's super-only branch never even runs. The API rejects it regardless —
+      // this just avoids a pointless 403 on an ordinary save.
+      ...(actor?.isSuper ? { ownerOrg: form.ownerOrg } : {}),
       runs,
     };
     let res: Response;
@@ -857,17 +871,48 @@ export default function EditProjectPage() {
         <span className={`badge ${form.published ? "b-grn" : "b-draft"}`}>
           {form.published ? "Published" : "Draft"}
         </span>
+        {readOnly && (
+          <span className="badge" title={`Owned by ${orgLabel(form.ownerOrg)}`}>
+            {orgLabel(form.ownerOrg)} — read only
+          </span>
+        )}
         <button
           onClick={save}
-          disabled={busy}
+          disabled={busy || readOnly}
           className="btn btn-teal"
-          style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.7 : 1 }}
+          title={
+            readOnly
+              ? `Owned by ${orgLabel(form.ownerOrg)} — ask one of their admins to edit it.`
+              : undefined
+          }
+          style={{
+            cursor: busy || readOnly ? "not-allowed" : "pointer",
+            opacity: busy || readOnly ? 0.5 : 1,
+          }}
         >
           {busy ? "Saving…" : "Save changes"}
         </button>
       </PageHeader>
 
       <div className="content">
+        {readOnly && (
+          <div
+            className="card card-pad"
+            style={{
+              marginBottom: 16,
+              borderColor: "var(--amber-line, var(--line))",
+              fontSize: 14,
+              lineHeight: 1.6,
+              color: "var(--ink-2)",
+            }}
+          >
+            <strong>Read-only.</strong> This project is owned by{" "}
+            <strong>{orgLabel(form.ownerOrg)}</strong>, so you can see it but not
+            change it — that&rsquo;s deliberate, so a mis-filed project is still
+            visible to whoever would notice. Ask one of their admins, or a super
+            admin if the owning team itself looks wrong.
+          </div>
+        )}
         <div className="card card-pad" style={{ maxWidth: 880, paddingBottom: 28 }}>
           <p className="subcopy" style={{ margin: "0 0 4px" }}>
             Update project details, manage its semester runs, and control whether
@@ -1625,7 +1670,42 @@ export default function EditProjectPage() {
             />
           </div>
 
-          {/* Surfaces — which public galleries this project appears on. */}
+          {/* Owning team — AUTHORITY, distinct from the galleries control below.
+              Only a super admin can move a project between teams; everyone else
+              sees a static badge so it's obvious who to ask. */}
+          <div style={{ ...S.field, marginTop: 22 }}>
+            <label style={S.lab}>Owning team</label>
+            {actor?.isSuper ? (
+              <>
+                <select
+                  className="fld"
+                  value={form.ownerOrg}
+                  onChange={(e) => set("ownerOrg", e.target.value)}
+                  style={{ maxWidth: 260 }}
+                >
+                  <option value="spark">Spark!</option>
+                  <option value="cds">CDS</option>
+                </select>
+                <div style={S.hint}>
+                  Which team&rsquo;s admins may edit this project. Moving it also
+                  removes it from the other team&rsquo;s PD sync.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink-2)" }}>
+                  {orgLabel(form.ownerOrg)}
+                </div>
+                <div style={S.hint}>
+                  Only a super admin can move a project to another team.
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Surfaces — which public galleries this project appears on. This is
+              VISIBILITY only: tagging the other gallery grants that team no edit
+              rights, which is why it isn't restricted to super admins. */}
           <div style={{ ...S.field, marginTop: 22 }}>
             <label style={S.lab}>Show on galleries</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 }}>
@@ -1687,8 +1767,16 @@ export default function EditProjectPage() {
             </div>
           </div>
 
-          {/* Danger zone — delete the project. */}
-          <div style={{ ...S.field, ...S.adminmark, marginTop: 22 }}>
+          {/* Danger zone — delete the project. Hidden outright when read-only:
+              a destructive control that always fails is worse than no control. */}
+          <div
+            style={{
+              ...S.field,
+              ...S.adminmark,
+              marginTop: 22,
+              display: readOnly ? "none" : undefined,
+            }}
+          >
             <label style={S.lab}>Danger zone</label>
             <button
               type="button"
@@ -1712,7 +1800,7 @@ export default function EditProjectPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 26, flexWrap: "wrap" }}>
             <button
               onClick={save}
-              disabled={busy}
+              disabled={busy || readOnly}
               className="btn btn-teal"
               style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.7 : 1 }}
             >

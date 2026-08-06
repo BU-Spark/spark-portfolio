@@ -21,6 +21,7 @@ import { disciplineColor, DISCIPLINE_ABBR } from "@/lib/colors";
 import type { Project } from "@/lib/types";
 import { normalizeName } from "@/lib/gdocs";
 import PageHeader from "@/components/admin/PageHeader";
+import { useActor, orgLabel, canEditHere } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
 import ConfirmModal from "@/components/admin/ConfirmModal";
 import MergeProjectsModal from "@/components/admin/MergeProjectsModal";
@@ -55,7 +56,13 @@ const MISSING_PILL: Record<string, string> = {
   Contributors: "no contributors",
 };
 
+// Foreign-team rows stay VISIBLE (with their actions disabled) rather than being
+// filtered out. That's deliberate: a project mis-filed to the wrong team would
+// otherwise be invisible to exactly the people who'd recognise the mistake, and
+// both teams would go on to create duplicates — which is the super-admin traffic
+// this whole feature is meant to avoid.
 export default function ManageProjectsPage() {
+  const actor = useActor();
   const router = useRouter();
   const { toastEl, notify } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -174,6 +181,10 @@ export default function ManageProjectsPage() {
     for (const p of projects) for (const r of p.runs) if (r.discipline) s.add(r.discipline);
     return [...s].sort();
   }, [projects]);
+
+  const mine = (p: Project) => canEditHere(actor, p.ownerOrg ?? "spark");
+  const lockedTitle = (p: Project) =>
+    `Owned by ${orgLabel(p.ownerOrg ?? "spark")} — ask one of their admins to change it.`;
 
   const togglePublish = async (p: Project) => {
     const nextPublished = p.published === false;
@@ -937,17 +948,53 @@ export default function ManageProjectsPage() {
                         <span style={{ color: "var(--faint)", fontWeight: 400 }}> · {p.partner}</span>
                       )}
                     </span>
+                    {!mine(p) && (
+                      <span
+                        title={lockedTitle(p)}
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 10,
+                          color: "var(--ink-3)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 5,
+                          padding: "1px 6px",
+                        }}
+                      >
+                        {orgLabel(p.ownerOrg ?? "spark")}
+                      </span>
+                    )}
                     <button
                       className="hidebtn"
                       onClick={() => togglePublish(p)}
-                      disabled={busy === p.id}
-                      style={{ fontSize: 11, padding: "4px 10px", color: "#15803d", borderColor: "#86efac" }}
+                      disabled={busy === p.id || !mine(p)}
+                      title={mine(p) ? undefined : lockedTitle(p)}
+                      style={{
+                        fontSize: 11,
+                        padding: "4px 10px",
+                        color: "#15803d",
+                        borderColor: "#86efac",
+                        opacity: mine(p) ? 1 : 0.45,
+                        cursor: mine(p) ? "pointer" : "not-allowed",
+                      }}
                     >
                       {busy === p.id ? "…" : "Publish"}
                     </button>
-                    <Link href={`/admin/edit/${p.id}`} className="editlink" style={{ fontSize: 11 }}>
-                      Edit
-                    </Link>
+                    {mine(p) ? (
+                      <Link href={`/admin/edit/${p.id}`} className="editlink" style={{ fontSize: 11 }}>
+                        Edit
+                      </Link>
+                    ) : (
+                      // Still linked, because the edit page renders read-only for
+                      // another team's project — useful for looking, not changing.
+                      <Link
+                        href={`/admin/edit/${p.id}`}
+                        className="editlink"
+                        title={lockedTitle(p)}
+                        style={{ fontSize: 11, opacity: 0.55 }}
+                      >
+                        View only
+                      </Link>
+                    )}
                     <Link
                       href={`/admin/projects/${p.id}`}
                       className="editlink"

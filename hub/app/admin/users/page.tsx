@@ -7,11 +7,14 @@
 // field, and API call is preserved.
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/admin/PageHeader";
+import { orgLabel } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
 
 interface AdminUser {
   id: number;
   email: string;
+  org: string;
+  isSuper: boolean;
   name: string | null;
   createdAt: string;
 }
@@ -32,6 +35,11 @@ export default function UsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
+  // No default: the team is a real decision, and POST /api/users rejects a missing
+  // or unknown value. Note there is deliberately no is_super control — super
+  // admins are promoted with SQL, so this form can only ever create a scoped
+  // admin, which is what makes a mistake here harmless.
+  const [org, setOrg] = useState("");
   const [busy, setBusy] = useState(false);
   // Current admin's email for the "you"/self-lockout guard. Sourced from the
   // next-auth session endpoint (client-only) rather than useSession(), since the
@@ -60,7 +68,7 @@ export default function UsersPage() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, org }),
     });
     setBusy(false);
     const data = await res.json().catch(() => ({}));
@@ -99,7 +107,9 @@ export default function UsersPage() {
         <p className="subcopy" style={{ marginBottom: 24 }}>
           People here can sign in with their BU Google account to add and edit
           gallery projects. Add someone&apos;s <b>@bu.edu</b> email and they can
-          sign in immediately — no password to set or send.
+          sign in immediately — no password to set or send. They will only be able
+          to create and edit <b>their own team&apos;s</b> projects; cross-team work
+          needs a super admin, which is granted directly in the database.
         </p>
 
         {/* Add admin */}
@@ -122,9 +132,25 @@ export default function UsersPage() {
                 required
               />
             </div>
+            <div style={{ minWidth: 180 }}>
+              <label className="lab" htmlFor="neworg">
+                Team
+              </label>
+              <select
+                className="fld"
+                id="neworg"
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+                required
+              >
+                <option value="">Choose a team…</option>
+                <option value="spark">Spark!</option>
+                <option value="cds">CDS</option>
+              </select>
+            </div>
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || !org}
               className="btn btn-teal"
               style={{ fontSize: 14, padding: "11px 20px" }}
             >
@@ -204,6 +230,38 @@ export default function UsersPage() {
                       }}
                     >
                       {u.email}
+                      {/* Team + super flag: without these the list can't answer the
+                          two questions it exists to answer — who can edit what, and
+                          who holds cross-team authority. */}
+                      <span
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 10,
+                          color: "var(--ink-3)",
+                          background: "var(--panel)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 5,
+                          padding: "1px 6px",
+                        }}
+                      >
+                        {orgLabel(u.org)}
+                      </span>
+                      {u.isSuper && (
+                        <span
+                          title="Cross-team authority. Granted in SQL only."
+                          style={{
+                            fontFamily: "var(--mono)",
+                            fontSize: 10,
+                            color: "var(--rose)",
+                            background: "var(--panel)",
+                            border: "1px solid var(--rose-line)",
+                            borderRadius: 5,
+                            padding: "1px 6px",
+                          }}
+                        >
+                          super
+                        </span>
+                      )}
                       {isMe && (
                         <span
                           style={{
