@@ -32,10 +32,12 @@ CREATE TABLE IF NOT EXISTS import_inbox (
   status text NOT NULL DEFAULT 'pending'::text,
   first_seen timestamp with time zone NOT NULL DEFAULT now(),
   last_seen timestamp with time zone NOT NULL DEFAULT now(),
-  seen_count integer NOT NULL DEFAULT 1
+  seen_count integer NOT NULL DEFAULT 1,
+  org text NOT NULL DEFAULT 'spark'::text
 );
 ALTER TABLE import_inbox ADD CONSTRAINT import_inbox_pkey PRIMARY KEY (id);
-CREATE UNIQUE INDEX idx_import_inbox_name_key ON public.import_inbox USING btree (name_key);
+ALTER TABLE import_inbox ADD CONSTRAINT import_inbox_org_chk CHECK ((org = ANY (ARRAY['spark'::text, 'cds'::text])));
+CREATE UNIQUE INDEX idx_import_inbox_org_name_key ON public.import_inbox USING btree (org, name_key);
 
 CREATE TABLE IF NOT EXISTS people (
   id bigserial,
@@ -117,9 +119,11 @@ CREATE TABLE IF NOT EXISTS projects (
   datasets jsonb NOT NULL DEFAULT '[]'::jsonb,
   code_private boolean NOT NULL DEFAULT false,
   client_desc text,
-  surfaces text[] NOT NULL DEFAULT '{spark}'::text[]
+  surfaces text[] NOT NULL DEFAULT '{spark}'::text[],
+  owner_org text NOT NULL DEFAULT 'spark'::text
 );
 ALTER TABLE projects ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
+ALTER TABLE projects ADD CONSTRAINT projects_owner_org_chk CHECK ((owner_org = ANY (ARRAY['spark'::text, 'cds'::text])));
 CREATE INDEX idx_projects_listing ON public.projects USING btree (published, featured, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -151,8 +155,12 @@ CREATE TABLE IF NOT EXISTS users (
   id serial,
   email text NOT NULL,
   name text,
-  created_at timestamp with time zone NOT NULL DEFAULT now()
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  org text NOT NULL DEFAULT 'spark'::text,
+  is_super boolean NOT NULL DEFAULT false
 );
 ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email);
 ALTER TABLE users ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+ALTER TABLE users ADD CONSTRAINT users_org_chk CHECK ((org = ANY (ARRAY['spark'::text, 'cds'::text])));
+CREATE UNIQUE INDEX users_email_lower_key ON public.users USING btree (lower(email));
 
