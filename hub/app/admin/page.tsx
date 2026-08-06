@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { primaryDiscipline, latestTerm, missingInfo } from "@/lib/project";
+import { useActor, canEditHere } from "@/components/admin/ActorContext";
 import type { Project } from "@/lib/types";
 import DashboardWheel, { type WheelSegment } from "@/components/admin/DashboardWheel";
 
@@ -29,6 +30,7 @@ const ALL_SECTIONS: { label: string; href: string; desc: string }[] = [
 ];
 
 export default function AdminDashboardPage() {
+  const actor = useActor();
   const [projects, setProjects] = useState<Project[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -98,7 +100,12 @@ export default function AdminDashboardPage() {
   }, [refresh, refreshCounts]);
 
   // --- stats derived client-side from the admin project list ----------------
-  const needsInfo = projects.filter((p) => missingInfo(p).length > 0);
+  // Own-team only, unlike /admin/projects. This is a WORK QUEUE: a to-do list full
+  // of items you're not allowed to fix is worse than no list. Cross-team visibility
+  // belongs on the projects page, where the point is noticing mis-filed records.
+  const needsInfo = projects.filter(
+    (p) => missingInfo(p).length > 0 && canEditHere(actor, p.ownerOrg ?? "spark")
+  );
   const attention = needsInfo.slice(0, 5);
 
   // ── the six wheel segments (colors + wedge lengths from the handoff spec) ──
