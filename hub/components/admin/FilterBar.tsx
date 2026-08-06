@@ -2,7 +2,7 @@
 // Collapsible filter container for admin list pages. Collapsed by default to keep
 // lists uncluttered; the header shows "Filters" + an activeCount pill, and toggles
 // to reveal `children` (the actual filter controls). Uses the shared .filterbar css.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function FilterBar({
   activeCount = 0,
@@ -14,6 +14,13 @@ export default function FilterBar({
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+
+  // `defaultOpen` can arrive late — a page restoring saved filters starts with a
+  // count of 0 and only knows it should be open a render later. Force-open only:
+  // never auto-collapse, or manually closing the bar would fight the caller.
+  useEffect(() => {
+    if (defaultOpen) setOpen(true);
+  }, [defaultOpen]);
 
   return (
     <div className="filterbar-wrap">
