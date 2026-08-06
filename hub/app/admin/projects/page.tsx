@@ -283,7 +283,11 @@ export default function ManageProjectsPage() {
     return [...s].sort();
   }, [projects]);
 
-  const mine = (p: Project) => canEditHere(actor, p.ownerOrg ?? "spark");
+  // useCallback so it's a stable dep for the memos below, not just for tidiness.
+  const mine = useCallback(
+    (p: Project) => canEditHere(actor, p.ownerOrg ?? "spark"),
+    [actor]
+  );
   const lockedTitle = (p: Project) =>
     `Owned by ${orgLabel(p.ownerOrg ?? "spark")} — ask one of their admins to change it.`;
 
@@ -586,9 +590,16 @@ export default function ManageProjectsPage() {
   const needsInfoCount = projects.filter((p) => missingInfo(p).length > 0).length;
 
   // Drafts in the current filtered view — drives "Select all N drafts".
+  //
+  // Restricted to projects this admin owns, which is what keeps every BULK action
+  // safe without touching any of them: publish/hide/merge/delete all read
+  // selectedIds, so making a foreign row unselectable is one guard at the single
+  // upstream chokepoint. requireProjects hard-fails a mixed batch server-side, so
+  // the alternative isn't data loss — it's selecting rows you can't act on and
+  // getting the whole batch rejected with no clue which row caused it.
   const filteredDrafts = useMemo(
-    () => filtered.filter((p) => p.published === false),
-    [filtered]
+    () => filtered.filter((p) => p.published === false && mine(p)),
+    [filtered, mine]
   );
   const allFilteredDraftsSelected =
     filteredDrafts.length > 0 && filteredDrafts.every((p) => selectedIds.has(p.id));
@@ -1284,8 +1295,12 @@ export default function ManageProjectsPage() {
                       type="checkbox"
                       checked={selected}
                       onChange={() => toggleSelect(p.id)}
-                      style={{ accentColor: "var(--teal)", cursor: "pointer" }}
-                      title="Select for bulk actions"
+                      disabled={!mine(p)}
+                      style={{
+                        accentColor: "var(--teal)",
+                        cursor: mine(p) ? "pointer" : "not-allowed",
+                      }}
+                      title={mine(p) ? "Select for bulk actions" : lockedTitle(p)}
                     />
                     {isDraft ? (
                       <span
