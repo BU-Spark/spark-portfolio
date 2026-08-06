@@ -20,6 +20,7 @@ import { DEFAULT_GALLERY_SETTINGS, disciplineFromCourse } from "./data";
 import { deleteObject } from "./s3";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
+import { ORGS } from "./authz";
 
 // Reuse one pool across hot reloads / warm serverless invocations.
 const globalForPool = globalThis as unknown as { sparkPool?: Pool };
@@ -130,6 +131,7 @@ interface ProjectRow {
   custom: boolean;
   published: boolean;
   surfaces: string[] | null;
+  owner_org: string | null;
   repo_url: string | null;
   prod_url: string | null;
   code_private: boolean;
@@ -221,6 +223,14 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
     clientUrl: r.client_url ?? null,
     clientDesc: r.client_desc ?? null,
     surfaces: r.surfaces ?? ["spark"],
+    // Which team may EDIT this project (authority), as opposed to `surfaces`
+    // above, which is only which gallery shows it (visibility).
+    //
+    // Set unconditionally, NOT gated on includePrivate. The importer reads via
+    // getAllProjects(), which uses the public projection — if this were private,
+    // every ownerOrg would be undefined, the importer's candidate index would be
+    // empty, and the PD sync would silently stop matching anything at all.
+    ownerOrg: r.owner_org ?? "spark",
     topics: r.topics ?? [],
     datasets: r.datasets ?? [],
     runs,
@@ -228,7 +238,7 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
 }
 
 const COLS =
-  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, repo_url, prod_url, code_private, client_url, client_desc, surfaces, topics, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
+  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, repo_url, prod_url, code_private, client_url, client_desc, surfaces, owner_org, topics, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
 
 // PUBLIC reads — only published projects, private run fields stripped. Cached in
 // the Next data cache and tagged "projects" so every visitor doesn't trigger a
@@ -273,6 +283,31 @@ export async function getProjectAdmin(id: string): Promise<Project | null> {
     [id]
   );
   return rows[0] ? rowToProject(rows[0], true) : null;
+}
+
+// Owning team for a set of project ids, in ONE query. This is the read behind
+// every permission check (lib/actor.ts requireProject/requireProjects), so it
+// deliberately selects a single column rather than reusing getProjectAdmin — a
+// permission check must not depend on the full admin projection.
+//
+// Ids absent from the returned map do not exist; the caller distinguishes 404
+// (unknown id) from 403 (someone else's project).
+export async function getProjectOrgs(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const rows = await query<{ id: string; owner_org: string | null }>(
+    `SELECT id, owner_org FROM projects WHERE id = ANY($1)`,
+    [ids]
+  );
+  return new Map(rows.map((r) => [r.id, r.owner_org ?? "spark"]));
+}
+
+// Move a project to another team. Deliberately NOT part of ProjectPatch: that
+// interface is consumed by the PD importer and the inbox merge path, so an
+// ownership field on it would be a bypass with two existing callers. Super-admin
+// only — enforced at the route, and the CHECK constraint rejects unknown orgs.
+export async function setProjectOwnerOrg(id: string, org: string): Promise<void> {
+  if (!ORGS.includes(org as never)) throw new Error(`Unknown org: ${org}`);
+  await query(`UPDATE projects SET owner_org = $2 WHERE id = $1`, [id, org]);
 }
 
 // Raw runs jsonb (with admin-only per-run fields: students/teamId/roles/pdUrl)
@@ -324,6 +359,10 @@ export interface NewProject {
   featured?: boolean;
   custom?: boolean;
   published?: boolean;
+  /** Owning team. Callers MUST pass the acting admin's org (or, for inbox
+   *  promotion, the inbox row's org) — never a client-supplied value. Omitted
+   *  falls back to the DB default 'spark', which is fail-closed. */
+  ownerOrg?: string;
 }
 
 // Normalize a contacts list for storage: trim name/email, drop rows that are
@@ -386,10 +425,14 @@ export function termsEqual(a: string | undefined | null, b: string | undefined |
 }
 
 export async function addProject(p: NewProject): Promise<void> {
+  // Fall back to 'spark' rather than trusting an unvalidated value through to the
+  // CHECK constraint — an unknown org here should become an ordinary Spark project,
+  // not a failed insert on the admin's create form.
+  const ownerOrg = ORGS.includes((p.ownerOrg ?? "") as never) ? (p.ownerOrg as string) : "spark";
   await query(
     `INSERT INTO projects
-       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb)
+       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts, owner_org, surfaces)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17,$18)
      ON CONFLICT (id) DO UPDATE SET
        title=EXCLUDED.title, blurb=EXCLUDED.blurb, client_type=EXCLUDED.client_type,
        partner=EXCLUDED.partner, tech=EXCLUDED.tech, images=EXCLUDED.images,
@@ -399,6 +442,10 @@ export async function addProject(p: NewProject): Promise<void> {
     // contact/contacts intentionally omitted from DO UPDATE: the importer/inbox
     // creation path never carries them, so an id collision must NOT wipe contacts
     // an admin already entered. New manual adds use a unique id (no conflict).
+    //
+    // owner_org and surfaces are omitted from DO UPDATE for the same reason and a
+    // sharper one: an id collision must never silently transfer a project to
+    // another team, nor reset the galleries an admin deliberately chose.
     [
       p.id,
       p.title,
@@ -416,6 +463,12 @@ export async function addProject(p: NewProject): Promise<void> {
       p.prodUrl ?? null,
       p.pdUrl ?? null,
       JSON.stringify(cleanContacts(p.contacts ?? [])),
+      ownerOrg,
+      // Surfaces DERIVES from ownership. Letting this fall through to the column
+      // default ('{spark}') would mean a CDS admin's new project appears in the
+      // SPARK gallery and nowhere a CDS admin would think to look for it. A super
+      // admin can still add the other gallery afterwards.
+      [ownerOrg],
     ]
   );
 }
@@ -793,12 +846,22 @@ async function ensureIngestTables(): Promise<void> {
        repo_url   text,
        roles      jsonb NOT NULL DEFAULT '{}',  -- {sparkProgramLead,pm,tpm,...}
        status     text NOT NULL DEFAULT 'pending', -- pending | dismissed
+       org        text NOT NULL DEFAULT 'spark',  -- which team's feed produced it
        first_seen timestamptz NOT NULL DEFAULT now(),
        last_seen  timestamptz NOT NULL DEFAULT now(),
        seen_count int NOT NULL DEFAULT 1
      )`
   );
-  await query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_import_inbox_name_key ON import_inbox (name_key)`);
+  // Keyed on (org, name_key), not name_key alone: two teams' trackers can hold a
+  // project with the same normalized name, and a single-column key would make one
+  // team's sync UPSERT onto the other team's inbox row.
+  //
+  // This MUST stay in step with hub/db/migrations/001_owner_org.sql — on an
+  // existing DB these are no-ops, but on a FRESH one this lazy DDL is the only
+  // thing that runs, so a stale definition here silently recreates the old key.
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_import_inbox_org_name_key ON import_inbox (org, name_key)`
+  );
   await query(
     `CREATE TABLE IF NOT EXISTS project_aliases (
        name_key   text PRIMARY KEY,         -- matchKey(trackerName)
@@ -857,6 +920,10 @@ export interface InboxRow extends InboxPayload {
   id: string; // bigserial — node-postgres returns as string
   nameKey: string;
   status: "pending" | "dismissed";
+  /** Which team's feed produced this row. Triage uses THIS, not the acting
+   *  admin's org, to decide who may act on it and what a created project ends up
+   *  owned by. */
+  org: string;
   seenCount: number;
   firstSeen: string;
   lastSeen: string;
@@ -893,9 +960,15 @@ export async function addAlias(nameKey: string, projectId: string): Promise<void
 // payload (filling only blanks, never nulling good data) and bump seen_count. A
 // row the admin DISMISSED stays dismissed even if it keeps appearing (status is
 // not touched by the upsert).
-export async function upsertInboxRow(p: InboxPayload): Promise<void> {
+// `org` identifies which team's feed produced the row. It comes from the caller
+// (IMPORT_ORG for the Apps Script, the acting admin's org for a CSV import) and
+// is what lets triage decide ownership WITHOUT trusting whoever happens to open
+// the inbox — deriving it at triage time would let a CDS admin turn a
+// Spark-sourced row into a CDS-owned project.
+export async function upsertInboxRow(p: InboxPayload, org: string): Promise<void> {
   const nameKey = matchKey(p.rawName);
   if (!nameKey) return;
+  if (!ORGS.includes(org as never)) throw new Error(`Unknown org: ${org}`);
   await ensureIngestTables();
   // Keep only present roles, so the jsonb `roles || EXCLUDED.roles` merge below
   // can ADD newly-seen roles without a later blank cell nulling a prior one.
@@ -906,9 +979,12 @@ export async function upsertInboxRow(p: InboxPayload): Promise<void> {
   }
   await query(
     `INSERT INTO import_inbox
-       (name_key, raw_name, partner, course, term, blurb, pd_url, tech_note, tech, repo_url, roles)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
-     ON CONFLICT (name_key) DO UPDATE SET
+       (name_key, raw_name, partner, course, term, blurb, pd_url, tech_note, tech, repo_url, roles, org)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
+     -- Conflict target must match idx_import_inbox_org_name_key exactly; on
+     -- (name_key) alone Postgres errors with "no unique or exclusion constraint
+     -- matching the ON CONFLICT specification" and every sync 500s.
+     ON CONFLICT (org, name_key) DO UPDATE SET
        raw_name  = EXCLUDED.raw_name,
        partner   = COALESCE(EXCLUDED.partner,   import_inbox.partner),
        course    = COALESCE(EXCLUDED.course,    import_inbox.course),
@@ -934,6 +1010,7 @@ export async function upsertInboxRow(p: InboxPayload): Promise<void> {
       p.tech ?? [],
       nz(p.repoUrl),
       JSON.stringify(cleanRoles),
+      org,
     ]
   );
 }
@@ -952,6 +1029,7 @@ interface InboxDbRow {
   repo_url: string | null;
   roles: InboxRoles;
   status: "pending" | "dismissed";
+  org: string | null;
   seen_count: number;
   first_seen: string;
   last_seen: string;
@@ -970,6 +1048,7 @@ const toInboxRow = (r: InboxDbRow): InboxRow => ({
   repoUrl: r.repo_url,
   roles: r.roles ?? {},
   status: r.status,
+  org: r.org ?? "spark",
   seenCount: r.seen_count,
   firstSeen: r.first_seen,
   lastSeen: r.last_seen,
@@ -1801,16 +1880,28 @@ export async function isAdminEmail(email: string): Promise<boolean> {
 
 // Add an email to the admin allowlist. Returns true if a new row was inserted,
 // false if the email was already present (idempotent). No password involved.
+//
+// `org` scopes what the new admin can edit and is REQUIRED by the caller (the
+// route validates it). is_super is intentionally not a parameter: super admins
+// are created by SQL alone, so no request can ever mint one, which is what makes
+// "forgetting to tag someone" produce a scoped admin rather than a super admin.
+//
+// ON CONFLICT targets lower(email), matching users_email_lower_key from
+// 001_owner_org.sql. The old case-sensitive users_email_key still exists, but
+// conflicting on it would let A@bu.edu and a@bu.edu become two rows with
+// different orgs — privilege confusion now that org carries authority.
 export async function addAdminEmail(
   email: string,
-  name: string
+  name: string,
+  org: string
 ): Promise<boolean> {
+  if (!ORGS.includes(org as never)) throw new Error(`Unknown org: ${org}`);
   const rows = await query<{ inserted: boolean }>(
-    `INSERT INTO users (email, name)
-     VALUES ($1, $2)
-     ON CONFLICT (email) DO NOTHING
+    `INSERT INTO users (email, name, org)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (lower(email)) DO NOTHING
      RETURNING true AS inserted`,
-    [email, name]
+    [email, name, org]
   );
   return rows.length > 0;
 }
@@ -1821,6 +1912,8 @@ export interface AdminUser {
   email: string;
   name: string | null;
   createdAt: string;
+  org: string;
+  isSuper: boolean;
 }
 
 export async function listUsers(): Promise<AdminUser[]> {
@@ -1829,17 +1922,34 @@ export async function listUsers(): Promise<AdminUser[]> {
     email: string;
     name: string | null;
     created_at: string;
-  }>(`SELECT id, email, name, created_at FROM users ORDER BY created_at ASC`);
+    org: string | null;
+    is_super: boolean | null;
+  }>(
+    `SELECT id, email, name, created_at, org, is_super FROM users ORDER BY created_at ASC`
+  );
   return rows.map((r) => ({
     id: r.id,
     email: r.email,
     name: r.name,
     createdAt: r.created_at,
+    org: r.org ?? "spark",
+    isSuper: r.is_super === true,
   }));
 }
 
 export async function countUsers(): Promise<number> {
   const rows = await query<{ n: number }>(`SELECT count(*)::int AS n FROM users`);
+  return rows[0]?.n ?? 0;
+}
+
+// Guard for DELETE /api/users/[id]: refuse to remove the last super admin.
+// is_super is grantable only by SQL, so deleting the final one would make
+// granting admin, editing the vocabulary, cross-org merges and ownership
+// reassignment unreachable by ANY account — recoverable only with DB access.
+export async function countSuperAdmins(): Promise<number> {
+  const rows = await query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM users WHERE is_super`
+  );
   return rows[0]?.n ?? 0;
 }
 

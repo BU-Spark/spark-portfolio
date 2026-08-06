@@ -34,6 +34,23 @@ Reserve sequential steps for genuine dependencies (B needs A), ordering
 constraints, or a cheap first step that decides whether later work is needed.
 Going sequential should be a deliberate choice, not the default.
 
+## Org-scoped admin permissions (CDS / Spark)
+- **`projects.owner_org` is authority; `projects.surfaces` is visibility.** Never
+  derive one from the other. Every `cds`-tagged project is *also* `spark`-tagged
+  (there are zero cds-only rows), so `surfaces` cannot express an edit boundary.
+- All 170 projects were backfilled to `owner_org='spark'` **on purpose** — the
+  cds-surface tag was applied to news/media projects and does not indicate CDS
+  ownership. A super admin reassigns the real CDS ones by hand. Do not "fix" this
+  with an `UPDATE … WHERE 'cds' = ANY(surfaces)`.
+- Rules live in `lib/authz.ts` (pure, unit-tested, imports nothing). Session/DB
+  resolution and the route guards live in `lib/actor.ts`. Routes use
+  `requireAdmin` / `requireSuper` / `requireProject(s)` — never a bare `auth()`.
+- `is_super` is granted by **SQL only**. No API accepts the field, so a mistake
+  yields a scoped admin, never a super admin.
+- Reassigning a project to CDS removes it from the Spark PD sync (the importer
+  pre-filters candidates by org and the Apps Script runs as `IMPORT_ORG=spark`).
+  That's intended, but it looks like a bug if you don't expect it.
+
 ## Conventions worth knowing
 - Image keys are bare S3 keys in a `text[]`; resolve via `imageUrl()` / `/api/img/[...key]`.
   Shared upload core is `lib/upload.ts` (admin + token uploaders share it).
