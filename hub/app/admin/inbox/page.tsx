@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import type { InboxRow } from "@/lib/db";
 import type { Project } from "@/lib/types";
 import PageHeader from "@/components/admin/PageHeader";
+import { useActor, orgLabel } from "@/components/admin/ActorContext";
 import ConfirmModal from "@/components/admin/ConfirmModal";
 import { useToast } from "@/components/admin/useToast";
 import CopyButton from "@/components/admin/CopyButton";
@@ -32,6 +33,7 @@ interface AliasEntry {
 }
 
 export default function ImportInboxPage() {
+  const actor = useActor();
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [dismissedRows, setDismissedRows] = useState<InboxRow[]>([]);
   const [aliases, setAliases] = useState<AliasEntry[]>([]);
@@ -582,6 +584,25 @@ export default function ImportInboxPage() {
                       }}
                     >
                       {r.rawName}
+                      {/* Only meaningful for supers — a scoped admin's list is
+                          already filtered to one team server-side, so the badge
+                          would be the same on every row. */}
+                      {actor?.isSuper && (
+                        <span
+                          title={`From the ${orgLabel(r.org)} tracker`}
+                          style={{
+                            marginLeft: 8,
+                            fontFamily: "var(--mono)",
+                            fontSize: 10,
+                            color: "var(--ink-3)",
+                            border: "1px solid var(--line)",
+                            borderRadius: 5,
+                            padding: "1px 6px",
+                          }}
+                        >
+                          {orgLabel(r.org)}
+                        </span>
+                      )}
                     </span>
                     {/* Meta row: partner · course · term · seen N× */}
                     <span

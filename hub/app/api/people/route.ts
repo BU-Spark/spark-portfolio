@@ -4,12 +4,12 @@
 //   POST  → { action: "merge", sourceId, targetId }  fold one person into another
 // All require an authenticated admin session. The directory is staff PII and is
 // NEVER exposed on any public route.
-import { auth } from "@/auth";
+import { requireAdmin, requireSuper } from "@/lib/actor";
 import { listPeople, mergePeople, updatePerson, deletePerson, getPersonTimeline, addPerson } from "@/lib/db";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const { searchParams } = new URL(req.url);
   const timelineId = searchParams.get("timeline");
   if (timelineId) {
@@ -21,8 +21,8 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: Record<string, unknown>;
   try {
@@ -53,8 +53,8 @@ export async function PATCH(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: Record<string, unknown>;
   try {
@@ -94,8 +94,14 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // Super-only, tightening the "people are shared" rule for this ONE verb.
+  // deletePerson cascades person_roles for EVERY project, so a scoped admin could
+  // erase a person's entire history on the other team's projects. Unlike a bad
+  // mergePeople — reversible by hand, since the source name survives as an alias
+  // on the target — this is irrecoverable. It's also rare, so the super round-trip
+  // costs almost nothing.
+  const g = await requireSuper();
+  if (!g.ok) return g.res;
 
   let body: Record<string, unknown>;
   try {

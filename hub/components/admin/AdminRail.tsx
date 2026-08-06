@@ -3,15 +3,19 @@
 // Grouped icon+label nav (Catalog / Pipeline / Admin), brand mark, inbox count
 // badge, and a footer with the signed-in admin + sign-out. Active item derived
 // from usePathname(). Collapses to an icon rail under 1080px (see spark-control.css).
-// No SessionProvider in the app → the footer reads /api/auth/session directly.
+// The signed-in admin comes from ActorContext (resolved server-side in the admin
+// layout), which replaces the old fetch("/api/auth/session") — that call couldn't
+// tell us the team anyway, since the session carries only name/email/image.
 import { useEffect, useState } from "react";
+import { useActor, orgLabel } from "@/components/admin/ActorContext";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 
 type IconName =
-  | "command" | "projects" | "people" | "inbox" | "media" | "bulk" | "import" | "admins" | "settings";
+  | "command" | "projects" | "people" | "inbox" | "media" | "bulk" | "import" | "admins"
+  | "settings" | "approvals";
 
 // Minimal stroke icons (24×24 viewBox; CSS sizes them to 17px).
 function Icon({ name }: { name: IconName }) {
@@ -37,6 +41,8 @@ function Icon({ name }: { name: IconName }) {
       return <svg {...common}>{p("M12 3v12")}{p("M8 11l4 4 4-4")}{p("M4 19h16")}</svg>;
     case "admins":
       return <svg {...common}><circle cx="12" cy="8" r="3.4" />{p("M5.5 20a6.5 6.5 0 0 1 13 0")}</svg>;
+    case "approvals":
+      return <svg {...common}>{p("M20 6L9 17l-5-5")}</svg>;
     case "settings":
       return <svg {...common}><circle cx="12" cy="12" r="3.2" />{p("M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1l2.1-2.1M17 7l2.1-2.1")}</svg>;
   }
@@ -47,15 +53,18 @@ interface NavItem { href: string; label: string; icon: IconName; exact?: boolean
 export default function AdminRail() {
   const pathname = usePathname() || "";
   const [inboxCount, setInboxCount] = useState(0);
-  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+  const [approvalCount, setApprovalCount] = useState(0);
+  const actor = useActor();
 
   useEffect(() => {
     const ac = new AbortController();
+    // Both counts are already org-scoped server-side, so the badges only ever show
+    // rows this admin can actually act on.
     fetch("/api/inbox", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (d?.count != null) setInboxCount(d.count);
     }).catch(() => {});
-    fetch("/api/auth/session", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((s) => {
-      if (s?.user) setUser({ name: s.user.name, email: s.user.email });
+    fetch("/api/approvals", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (Array.isArray(d?.items)) setApprovalCount(d.items.length);
     }).catch(() => {});
     return () => ac.abort();
   }, []);
@@ -70,18 +79,24 @@ export default function AdminRail() {
       { href: "/admin/people", label: "People", icon: "people" },
     ]},
     { title: "Pipeline", items: [
+      { href: "/admin/approvals", label: "Approvals", icon: "approvals", badge: approvalCount },
       { href: "/admin/inbox", label: "Import inbox", icon: "inbox", badge: inboxCount },
       { href: "/admin/import", label: "Import CSV", icon: "import" },
       { href: "/admin/uploads", label: "Uploads", icon: "media" },
       { href: "/admin/bulk-uploads", label: "Bulk uploads", icon: "bulk" },
     ]},
-    { title: "Admin", items: [
-      { href: "/admin/users", label: "Admins", icon: "admins" },
-      { href: "/admin/settings", label: "Settings", icon: "settings" },
-    ]},
+    // Hidden rather than disabled for non-supers: both pages are super-only at the
+    // API, so they'd be dead ends. "Import CSV" stays visible for everyone — it's
+    // org-scoped now, not super-only.
+    ...(actor?.isSuper
+      ? [{ title: "Admin", items: [
+          { href: "/admin/users", label: "Admins", icon: "admins" as IconName },
+          { href: "/admin/settings", label: "Settings", icon: "settings" as IconName },
+        ]}]
+      : []),
   ];
 
-  const initials = (user?.name || user?.email || "?")
+  const initials = (actor?.email || "?")
     .split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase()).join("") || "?";
 
   return (
@@ -112,8 +127,12 @@ export default function AdminRail() {
       <div className="rail-foot">
         <span className="rail-ava">{initials}</span>
         <span className="who">
-          <span className="nm">{user?.name || "Admin"}</span>
-          <span className="em">{user?.email || ""}</span>
+          {/* Team is shown permanently: what you can edit now depends on it, so
+              "which hat am I wearing" must never be a guess. */}
+          <span className="nm">
+            {actor?.isSuper ? "Super admin" : orgLabel(actor?.org)}
+          </span>
+          <span className="em">{actor?.email || ""}</span>
         </span>
         <button className="out" title="Sign out" aria-label="Sign out" onClick={() => signOut({ callbackUrl: "/admin/login" })}>
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">

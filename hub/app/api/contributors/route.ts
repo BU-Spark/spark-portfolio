@@ -3,12 +3,12 @@
 // any public payload. GET lists a project's contributors; PUT replaces the full
 // set for a project (the edit form sends the whole list). Keyed per-semester via
 // each row's `term`, since a project's team differs across runs.
-import { auth } from "@/auth";
+import { requireAdmin, requireProject, requireProjects } from "@/lib/actor";
 import { listContributors, setProjectContributors, type ContributorInput } from "@/lib/db";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const projectId = new URL(req.url).searchParams.get("projectId");
   if (!projectId) return Response.json({ error: "projectId required" }, { status: 400 });
   const contributors = await listContributors(projectId);
@@ -16,8 +16,8 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: { projectId?: unknown; contributors?: unknown };
   try {
@@ -27,6 +27,11 @@ export async function PUT(req: Request) {
   }
   const projectId = String(body.projectId || "").trim();
   if (!projectId) return Response.json({ error: "projectId required" }, { status: 400 });
+
+  // Contributors hang off project_id, so leaving this unscoped would be a side
+  // door into the other team's projects — the roster is replaced wholesale.
+  const pg = await requireProject(projectId);
+  if (!pg.ok) return pg.res;
   if (!Array.isArray(body.contributors)) {
     return Response.json({ error: "contributors must be an array" }, { status: 400 });
   }

@@ -4,7 +4,7 @@
 // auto-emailing when a Resend domain is configured (copy-links otherwise — same
 // dormant-email behavior as the single flow). Idempotent: projects that already
 // have a live (open) link are skipped, never double-minted.
-import { auth } from "@/auth";
+import { requireAdmin, requireProject, requireProjects } from "@/lib/actor";
 import {
   createUploadRequest,
   getProjectsForList,
@@ -32,18 +32,22 @@ function baseUrl(req: Request): string {
 // GET — the outreach worklist: projects that still need screenshots (no images),
 // each with its PM + resolved email + any existing live link.
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   const [projects, peopleMap, open] = await Promise.all([
     getProjectsForList(),
     getPeopleMap(),
-    listUploadRequests("open"),
+    listUploadRequests("open", g.actor),
   ]);
   const openByProject = new Map(open.map((r) => [r.projectId, r.token]));
   const base = baseUrl(req);
 
   const candidates = projects
+    // Own-org only. This is a WORKLIST — rows you cannot act on are pure noise,
+    // unlike the projects list, where cross-org visibility exists on purpose so
+    // mis-filed projects get spotted. Supers see everything.
+    .filter((p) => g.actor.isSuper || (p.ownerOrg ?? "spark") === g.actor.org)
     .filter((p) => !(p.images && p.images.length)) // needs screenshots
     .map((p) => {
       const pm = (p.pm || "").trim();
@@ -66,8 +70,8 @@ export async function GET(req: Request) {
 // Body: { projectIds: string[] }. Partial-success: one project's failure never
 // aborts the batch. Returns a per-project result list + counts.
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: { projectIds?: unknown };
   try {
@@ -80,10 +84,17 @@ export async function POST(req: Request) {
     : [];
   if (!ids.length) return Response.json({ error: "No projectIds provided." }, { status: 400 });
 
+  // All-or-nothing on the batch rather than per-item "forbidden" results: because
+  // GET above is already org-filtered, a mixed batch can only come from a
+  // hand-crafted request, so the extra per-item plumbing would serve a case the UI
+  // cannot produce.
+  const pg = await requireProjects(ids);
+  if (!pg.ok) return pg.res;
+
   const [projects, peopleMap, open] = await Promise.all([
     getProjectsForList(),
     getPeopleMap(),
-    listUploadRequests("open"),
+    listUploadRequests("open", g.actor),
   ]);
   const byId = new Map(projects.map((p) => [p.id, p]));
   const openSet = new Set(open.map((r) => r.projectId));

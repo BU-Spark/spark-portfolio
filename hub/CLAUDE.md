@@ -34,6 +34,44 @@ Reserve sequential steps for genuine dependencies (B needs A), ordering
 constraints, or a cheap first step that decides whether later work is needed.
 Going sequential should be a deliberate choice, not the default.
 
+## Org-scoped admin permissions (CDS / Spark)
+- **`projects.owner_org` is authority; `projects.surfaces` is visibility.** Never
+  derive one from the other. Every `cds`-tagged project is *also* `spark`-tagged
+  (there are zero cds-only rows), so `surfaces` cannot express an edit boundary.
+- All 170 projects were backfilled to `owner_org='spark'` **on purpose** — the
+  cds-surface tag was applied to news/media projects and does not indicate CDS
+  ownership. A super admin reassigns the real CDS ones by hand. Do not "fix" this
+  with an `UPDATE … WHERE 'cds' = ANY(surfaces)`.
+- Rules live in `lib/authz.ts` (pure, unit-tested, imports nothing). Session/DB
+  resolution and the route guards live in `lib/actor.ts`. Routes use
+  `requireAdmin` / `requireSuper` / `requireProject(s)` — never a bare `auth()`.
+- `is_super` is granted by **SQL only**. No API accepts the field, so a mistake
+  yields a scoped admin, never a super admin.
+- Reassigning a project to CDS removes it from the Spark PD sync (the importer
+  pre-filters candidates by org and the Apps Script runs as `IMPORT_ORG=spark`).
+  That's intended, but it looks like a bug if you don't expect it.
+
+## Approvals queue + weekly Slack digest
+- `/admin/approvals` is a **worklist**, so it shows only rows the actor can act on
+  (supers see all) — unlike `/admin/projects`, where foreign rows stay visible so a
+  mis-filed project is noticeable. Ordered oldest-first, never grouped by kind.
+- **Waiting-on-a-person items and standing data gaps are separate.** Nothing is
+  "waiting" on a missing tech stack, and today 100% of projects have no images, so
+  mixing the backlog into the queue would bury the rows someone can actually clear.
+- The digest **stays silent when nothing is waiting on a person.** That's the
+  anti-noise mechanism: the backlog half is near-static, so a digest that fired
+  regardless would send a near-identical message weekly and get muted.
+- `digest_snapshots` stores each run's counts so the backlog renders as a delta.
+  Snapshots are written on a successful post *and* on a silent week, but **not** on a
+  failed Slack post — recording that would make the next diff silently swallow a week.
+- Env: `DIGEST_TOKEN` (bearer secret), `SLACK_WEBHOOK_URL`, `DIGEST_ORG`
+  (validated against `ORGS` like `IMPORT_ORG`, never taken from the request).
+  Scheduled by `.github/workflows/weekly-digest.yml`, **not** a Cloudflare cron —
+  a Worker cron needs a `scheduled` export and OpenNext emits a fetch-only worker.
+  `?dry=1` renders the message without posting or snapshotting.
+- The draft ready/blocked split in `listOpenApprovals` mirrors `publishBlockers()`
+  in `lib/project.ts`. Keep the two in step.
+
 ## Conventions worth knowing
 - Image keys are bare S3 keys in a `text[]`; resolve via `imageUrl()` / `/api/img/[...key]`.
   Shared upload core is `lib/upload.ts` (admin + token uploaders share it).

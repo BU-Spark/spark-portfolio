@@ -3,7 +3,7 @@
 //   GET  → current settings (public; the gallery + admin forms read it)
 //   PUT  → save settings (admin session required)
 import { revalidateTag } from "next/cache";
-import { auth } from "@/auth";
+import { requireSuper } from "@/lib/actor";
 import { getGallerySettings, saveGallerySettings } from "@/lib/db";
 import type { GallerySettings } from "@/lib/types";
 
@@ -12,8 +12,10 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // The vocabulary is shared by both galleries, so editing it is cross-org by
+  // definition. GET stays public — the gallery reads facet names on every render.
+  const g = await requireSuper();
+  if (!g.ok) return g.res;
 
   let body: Partial<GallerySettings>;
   try {

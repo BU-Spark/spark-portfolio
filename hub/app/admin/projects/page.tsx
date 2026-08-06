@@ -21,6 +21,7 @@ import { disciplineColor, DISCIPLINE_ABBR } from "@/lib/colors";
 import type { Project } from "@/lib/types";
 import { normalizeName } from "@/lib/gdocs";
 import PageHeader from "@/components/admin/PageHeader";
+import { useActor, orgLabel, canEditHere } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
 import ConfirmModal from "@/components/admin/ConfirmModal";
 import MergeProjectsModal from "@/components/admin/MergeProjectsModal";
@@ -40,7 +41,27 @@ const PIP_FIELDS = [
   { key: "GitHub repo", label: "Repo" },
 ] as const;
 
-type Tab = "all" | "published" | "drafts" | "needsInfo";
+const TABS = ["all", "published", "drafts", "needsInfo"] as const;
+type Tab = (typeof TABS)[number];
+
+// Filters are remembered per browser tab, so clicking into a project and hitting
+// back leaves the list narrowed exactly as you left it. sessionStorage (not
+// localStorage) is deliberate: a narrow filter shouldn't silently survive into a
+// session next week, where an empty list looks like missing data.
+const FILTERS_KEY = "spark:admin-projects-filters";
+
+interface StoredFilters {
+  query: string;
+  tab: Tab;
+  leadFilter: string;
+  pmFilter: string;
+  tpmFilter: string;
+  termFilter: string;
+  disciplineFilter: string;
+  gapIncludes: string[];
+  gapExcludes: string[];
+  gapMode: "all" | "any";
+}
 
 // Gap chips offered in the FilterBar (Course added per audit).
 const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Contributors"] as const;
@@ -55,7 +76,13 @@ const MISSING_PILL: Record<string, string> = {
   Contributors: "no contributors",
 };
 
+// Foreign-team rows stay VISIBLE (with their actions disabled) rather than being
+// filtered out. That's deliberate: a project mis-filed to the wrong team would
+// otherwise be invisible to exactly the people who'd recognise the mistake, and
+// both teams would go on to create duplicates — which is the super-admin traffic
+// this whole feature is meant to avoid.
 export default function ManageProjectsPage() {
+  const actor = useActor();
   const router = useRouter();
   const { toastEl, notify } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -89,6 +116,16 @@ export default function ManageProjectsPage() {
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // Which row's overflow (⋯) menu is open, if any.
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  // Flips true once the stored filters have been read, which is what lets the save
+  // effect tell "user cleared the filters" from "state hasn't loaded yet".
+  //
+  // State, NOT a ref: setting a ref at the end of the restore effect would already
+  // read true when the save effect runs later in that same commit, and the save
+  // effect still closes over the pre-restore (empty) values — so it would write
+  // empties straight over what was just read. As state it batches with the restore's
+  // other setState calls, so the save effect first sees it on the next render, with
+  // the restored values in hand.
+  const [restored, setRestored] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -119,20 +156,91 @@ export default function ManageProjectsPage() {
       .catch(() => {});
   }, []);
 
-  // Read ?tab= and ?gap= deep-links from the dashboard once on mount. Reading
-  // window.location directly avoids needing a useSearchParams Suspense boundary.
+  // Restore the filters from the last visit, then apply ?tab=/?gap= deep-links from
+  // the dashboard. Reading window.location directly avoids needing a
+  // useSearchParams Suspense boundary.
+  //
+  // A deep-link REPLACES stored filters instead of stacking on them: the dashboard
+  // says "6 projects missing a repo", and landing on a list also narrowed by a
+  // forgotten PM filter would show 1, making the dashboard look wrong.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("tab");
-    if (t === "all" || t === "published" || t === "drafts" || t === "needsInfo") {
-      setTab(t);
-    }
     const g = params.get("gap");
+    const deepLinked = !!t || !!g;
+
+    if (!deepLinked) {
+      try {
+        const raw = sessionStorage.getItem(FILTERS_KEY);
+        if (raw) {
+          const s = JSON.parse(raw) as Partial<StoredFilters>;
+          if (typeof s.query === "string") setQuery(s.query);
+          if (s.tab && (TABS as readonly string[]).includes(s.tab)) setTab(s.tab);
+          if (typeof s.leadFilter === "string") setLeadFilter(s.leadFilter);
+          if (typeof s.pmFilter === "string") setPmFilter(s.pmFilter);
+          if (typeof s.tpmFilter === "string") setTpmFilter(s.tpmFilter);
+          if (typeof s.termFilter === "string") setTermFilter(s.termFilter);
+          if (typeof s.disciplineFilter === "string") setDisciplineFilter(s.disciplineFilter);
+          // Gap chips are validated against the current vocabulary — a renamed field
+          // would otherwise restore a chip that matches nothing and can't be cleared
+          // from the UI, since no chip renders for an unknown value.
+          const gaps = (v: unknown) =>
+            new Set(
+              Array.isArray(v)
+                ? v.filter((x): x is string => (GAP_FIELDS as readonly string[]).includes(x))
+                : []
+            );
+          setGapIncludes(gaps(s.gapIncludes));
+          setGapExcludes(gaps(s.gapExcludes));
+          if (s.gapMode === "any" || s.gapMode === "all") setGapMode(s.gapMode);
+        }
+      } catch {
+        // Corrupt/unavailable storage (private mode, quota) — just start unfiltered.
+      }
+    }
+
+    if (t && (TABS as readonly string[]).includes(t)) setTab(t as Tab);
     if (g) {
       const wanted = GAP_FIELDS.find((f) => f === g || normalizeName(f) === normalizeName(g));
       if (wanted) setGapIncludes(new Set([wanted]));
     }
+    setRestored(true);
   }, []);
+
+  // Persist on every change. Gated on `restored` so the mount pass — which runs
+  // with the empty defaults still in state — can't clobber what we just read.
+  useEffect(() => {
+    if (!restored) return;
+    const payload: StoredFilters = {
+      query,
+      tab,
+      leadFilter,
+      pmFilter,
+      tpmFilter,
+      termFilter,
+      disciplineFilter,
+      gapIncludes: [...gapIncludes],
+      gapExcludes: [...gapExcludes],
+      gapMode,
+    };
+    try {
+      sessionStorage.setItem(FILTERS_KEY, JSON.stringify(payload));
+    } catch {
+      // Storage unavailable — filters just won't persist. Not worth surfacing.
+    }
+  }, [
+    restored,
+    query,
+    tab,
+    leadFilter,
+    pmFilter,
+    tpmFilter,
+    termFilter,
+    disciplineFilter,
+    gapIncludes,
+    gapExcludes,
+    gapMode,
+  ]);
 
   // name_key (+ aliases) → canonical name; canonical(raw) resolves a stored value.
   const keyToName = useMemo(() => {
@@ -174,6 +282,14 @@ export default function ManageProjectsPage() {
     for (const p of projects) for (const r of p.runs) if (r.discipline) s.add(r.discipline);
     return [...s].sort();
   }, [projects]);
+
+  // useCallback so it's a stable dep for the memos below, not just for tidiness.
+  const mine = useCallback(
+    (p: Project) => canEditHere(actor, p.ownerOrg ?? "spark"),
+    [actor]
+  );
+  const lockedTitle = (p: Project) =>
+    `Owned by ${orgLabel(p.ownerOrg ?? "spark")} — ask one of their admins to change it.`;
 
   const togglePublish = async (p: Project) => {
     const nextPublished = p.published === false;
@@ -474,9 +590,16 @@ export default function ManageProjectsPage() {
   const needsInfoCount = projects.filter((p) => missingInfo(p).length > 0).length;
 
   // Drafts in the current filtered view — drives "Select all N drafts".
+  //
+  // Restricted to projects this admin owns, which is what keeps every BULK action
+  // safe without touching any of them: publish/hide/merge/delete all read
+  // selectedIds, so making a foreign row unselectable is one guard at the single
+  // upstream chokepoint. requireProjects hard-fails a mixed batch server-side, so
+  // the alternative isn't data loss — it's selecting rows you can't act on and
+  // getting the whole batch rejected with no clue which row caused it.
   const filteredDrafts = useMemo(
-    () => filtered.filter((p) => p.published === false),
-    [filtered]
+    () => filtered.filter((p) => p.published === false && mine(p)),
+    [filtered, mine]
   );
   const allFilteredDraftsSelected =
     filteredDrafts.length > 0 && filteredDrafts.every((p) => selectedIds.has(p.id));
@@ -633,7 +756,9 @@ export default function ManageProjectsPage() {
         </div>
 
         {/* Collapsible filters */}
-        <FilterBar activeCount={activeFilterCount}>
+        {/* Opened automatically when filters are already on, so a restored filter is
+            never invisible — the collapsed bar would otherwise hide why rows are missing. */}
+        <FilterBar activeCount={activeFilterCount} defaultOpen={activeFilterCount > 0}>
           <div className="filterpanel">
             {/* Dropdown filters — labeled grid */}
             <div className="filtergrid">
@@ -937,17 +1062,53 @@ export default function ManageProjectsPage() {
                         <span style={{ color: "var(--faint)", fontWeight: 400 }}> · {p.partner}</span>
                       )}
                     </span>
+                    {!mine(p) && (
+                      <span
+                        title={lockedTitle(p)}
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 10,
+                          color: "var(--ink-3)",
+                          border: "1px solid var(--line)",
+                          borderRadius: 5,
+                          padding: "1px 6px",
+                        }}
+                      >
+                        {orgLabel(p.ownerOrg ?? "spark")}
+                      </span>
+                    )}
                     <button
                       className="hidebtn"
                       onClick={() => togglePublish(p)}
-                      disabled={busy === p.id}
-                      style={{ fontSize: 11, padding: "4px 10px", color: "#15803d", borderColor: "#86efac" }}
+                      disabled={busy === p.id || !mine(p)}
+                      title={mine(p) ? undefined : lockedTitle(p)}
+                      style={{
+                        fontSize: 11,
+                        padding: "4px 10px",
+                        color: "#15803d",
+                        borderColor: "#86efac",
+                        opacity: mine(p) ? 1 : 0.45,
+                        cursor: mine(p) ? "pointer" : "not-allowed",
+                      }}
                     >
                       {busy === p.id ? "…" : "Publish"}
                     </button>
-                    <Link href={`/admin/edit/${p.id}`} className="editlink" style={{ fontSize: 11 }}>
-                      Edit
-                    </Link>
+                    {mine(p) ? (
+                      <Link href={`/admin/edit/${p.id}`} className="editlink" style={{ fontSize: 11 }}>
+                        Edit
+                      </Link>
+                    ) : (
+                      // Still linked, because the edit page renders read-only for
+                      // another team's project — useful for looking, not changing.
+                      <Link
+                        href={`/admin/edit/${p.id}`}
+                        className="editlink"
+                        title={lockedTitle(p)}
+                        style={{ fontSize: 11, opacity: 0.55 }}
+                      >
+                        View only
+                      </Link>
+                    )}
                     <Link
                       href={`/admin/projects/${p.id}`}
                       className="editlink"
@@ -1134,8 +1295,12 @@ export default function ManageProjectsPage() {
                       type="checkbox"
                       checked={selected}
                       onChange={() => toggleSelect(p.id)}
-                      style={{ accentColor: "var(--teal)", cursor: "pointer" }}
-                      title="Select for bulk actions"
+                      disabled={!mine(p)}
+                      style={{
+                        accentColor: "var(--teal)",
+                        cursor: mine(p) ? "pointer" : "not-allowed",
+                      }}
+                      title={mine(p) ? "Select for bulk actions" : lockedTitle(p)}
                     />
                     {isDraft ? (
                       <span

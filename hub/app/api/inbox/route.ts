@@ -8,7 +8,7 @@
 //   - restore       → un-dismiss a row (return it to pending)
 //   - remove-alias  → delete a DB-stored project alias by nameKey
 // The inbox carries team-role names (admin-only PII), so all verbs are auth-gated.
-import { auth } from "@/auth";
+import { requireAdmin, requireProject } from "@/lib/actor";
 import {
   listInbox,
   listAliases,
@@ -21,19 +21,21 @@ import {
 import { revalidateTag } from "next/cache";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const { searchParams } = new URL(req.url);
   const statusParam = searchParams.get("status");
   const status =
     statusParam === "dismissed" ? "dismissed" : statusParam === "all" ? "all" : "pending";
-  const [rows, aliases] = await Promise.all([listInbox(status), listAliases()]);
+  // Scoped to the actor's org (supers see everything): rows carry the producing
+  // team's role names, which are admin-only PII.
+  const [rows, aliases] = await Promise.all([listInbox(status, g.actor), listAliases()]);
   return Response.json({ rows, count: rows.length, aliases });
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: { action?: string; id?: unknown; projectId?: unknown; nameKey?: unknown };
   try {
@@ -50,7 +52,15 @@ export async function POST(req: Request) {
       const id = Number(body.id);
       if (!Number.isFinite(id)) return Response.json({ error: "Bad id" }, { status: 400 });
       if (body.action === "create") {
-        const projectId = await createProjectFromInbox(id);
+        // Ownership comes from the ROW's org, not the actor's — see
+        // createProjectFromInbox. A CDS admin cannot promote a Spark-sourced row.
+        const projectId = await createProjectFromInbox(id, g.actor);
+        if (projectId === "forbidden") {
+          return Response.json(
+            { error: "That row came from another team's tracker." },
+            { status: 403 }
+          );
+        }
         if (!projectId) return Response.json({ error: "Row not found" }, { status: 404 });
         revalidateTag("projects");
         return Response.json({ ok: true, projectId });
@@ -58,23 +68,42 @@ export async function POST(req: Request) {
       if (body.action === "merge") {
         const projectId = String(body.projectId || "").trim();
         if (!projectId) return Response.json({ error: "projectId required" }, { status: 400 });
-        const ok = await mergeInboxRow(id, projectId);
+        // Two-sided: the row's feed AND the target project must both be the
+        // actor's. Checked before the durable alias is written.
+        const ok = await mergeInboxRow(id, projectId, g.actor);
+        if (ok === "forbidden") {
+          return Response.json(
+            { error: "The row or the target project belongs to another team." },
+            { status: 403 }
+          );
+        }
         if (!ok) return Response.json({ error: "Row or project not found" }, { status: 404 });
         revalidateTag("projects");
         return Response.json({ ok: true, projectId });
       }
       if (body.action === "dismiss") {
-        await dismissInboxRow(id);
+        if (!(await dismissInboxRow(id, g.actor))) {
+          return Response.json({ error: "Row not found or not yours." }, { status: 404 });
+        }
         return Response.json({ ok: true });
       }
       // restore
-      await restoreInboxRow(id);
+      if (!(await restoreInboxRow(id, g.actor))) {
+        return Response.json({ error: "Row not found or not yours." }, { status: 404 });
+      }
       return Response.json({ ok: true });
     }
     case "remove-alias": {
       const nameKey = String(body.nameKey || "").trim();
       if (!nameKey) return Response.json({ error: "nameKey required" }, { status: 400 });
-      await removeAlias(nameKey);
+      // Scoped by the owner of the project the alias points at: deleting it changes
+      // what that team's next sync matches.
+      if (!(await removeAlias(nameKey, g.actor))) {
+        return Response.json(
+          { error: "Alias not found, or its project belongs to another team." },
+          { status: 404 }
+        );
+      }
       revalidateTag("projects");
       return Response.json({ ok: true });
     }

@@ -2,14 +2,14 @@
 // <ImageSlot>, stores it in the S3 bucket, and returns the object key. The key
 // (not a data URL) is what gets persisted on the project. Validation + storage
 // live in lib/upload so the token-gated PM uploader shares identical rules.
-import { auth } from "@/auth";
+import { requireAdmin } from "@/lib/actor";
 import { processImageUpload } from "@/lib/upload";
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Any admin: this returns an S3 key and is not project-bound. Keys only become
+  // visible once written onto a project, which IS org-scoped.
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let dataUrl: string | undefined;
   try {

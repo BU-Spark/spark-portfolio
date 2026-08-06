@@ -63,6 +63,11 @@ export interface Project {
   featured?: boolean; // spotlighted on the gallery
   published?: boolean; // false = draft, hidden from the public gallery
   surfaces?: string[]; // which galleries it appears on: "spark" and/or "cds" (default ["spark"])
+  // VISIBILITY (surfaces) vs AUTHORITY (ownerOrg) — deliberately separate axes.
+  // A project can be tagged for both galleries while exactly one team may edit it.
+  // Never derive one from the other: every cds-tagged project is also spark-tagged,
+  // so surfaces cannot express an edit boundary. See lib/authz.ts.
+  ownerOrg?: string; // owning team: "spark" | "cds" (default "spark")
   custom?: boolean; // admin-added flag
   // DERIVED, ADMIN-ONLY: number of student contributors on this project. Set only
   // by getProjectsForList() (the admin list projection); undefined on public

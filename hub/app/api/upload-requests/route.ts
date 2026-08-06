@@ -1,7 +1,7 @@
 // Admin-gated: mint an upload magic link for a project (and optionally email it),
 // and list the review queue. Uses the same auth() pattern as the other admin
 // routes — a session implies the user is already allowlisted.
-import { auth } from "@/auth";
+import { requireAdmin, requireProject, requireProjects } from "@/lib/actor";
 import {
   createUploadRequest,
   listUploadRequests,
@@ -20,8 +20,8 @@ function baseUrl(req: Request): string {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
 
   let body: { projectId?: string; email?: string };
   try {
@@ -32,6 +32,10 @@ export async function POST(req: Request) {
   const projectId = (body.projectId || "").trim();
   const email = (body.email || "").trim() || null;
   if (!projectId) return Response.json({ error: "Missing projectId" }, { status: 400 });
+
+  // Minting a link emails an external PM in the project's name — must own it.
+  const pg = await requireProject(projectId);
+  if (!pg.ok) return pg.res;
 
   const project = await getProjectAdmin(projectId);
   if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
@@ -51,15 +55,23 @@ export async function POST(req: Request) {
 // GET — the review queue (?status=submitted, default), any status, or all
 // requests for one project (?projectId=…, for the edit page's existing-links list).
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const g = await requireAdmin();
+  if (!g.ok) return g.res;
   const sp = new URL(req.url).searchParams;
   const projectId = sp.get("projectId");
   if (projectId) {
+    // Per-project branch needs its own check: listProjectUploadRequests takes only
+    // a project id and applies no org filter, so without this a scoped admin could
+    // name any project and read back its upload TOKENS — and a token is a
+    // capability, granting login-free upload rights on that project. The recipient
+    // emails leaking alongside them are the smaller half of the problem.
+    const pg = await requireProject(projectId);
+    if (!pg.ok) return pg.res;
     const requests = await listProjectUploadRequests(projectId);
     return Response.json({ requests });
   }
   const status = sp.get("status") as "open" | "submitted" | "approved" | null;
-  const requests = await listUploadRequests(status ?? "submitted");
+  // Org-filtered: the queue exposes external recipient email addresses.
+  const requests = await listUploadRequests(status ?? "submitted", g.actor);
   return Response.json({ requests });
 }
