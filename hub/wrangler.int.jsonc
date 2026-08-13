@@ -20,6 +20,14 @@
       "custom_domain": true
     }
   ],
+  // See wrangler.jsonc for why these live in config rather than as dashboard vars.
+  // Same sender as prod: the point of testing here is to prove the real sender
+  // actually delivers, which a different address wouldn't establish.
+  "vars": {
+    "NEXTAUTH_URL": "https://int.hub.buspark.io",
+    "EMAIL_FROM": "no-reply@buspark.io",
+    "EMAIL_REPLY_TO": "buspark@bu.edu"
+  },
   "observability": {
     "enabled": true
   }
