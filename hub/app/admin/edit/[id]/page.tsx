@@ -11,6 +11,8 @@ import {
   SPARK_TERMS,
   SURFACES,
   disciplineFromCourse,
+  PROJECT_STATUSES,
+  PROJECT_STATUS_LABELS,
 } from "@/lib/data";
 import ImageSlot from "@/components/ImageSlot";
 import PdBlurbFetch from "@/components/PdBlurbFetch";
@@ -149,6 +151,8 @@ interface EditState {
   /** Owning team of the loaded project — decides read-only vs editable, and is
    *  only ever *changed* by a super admin (see the "Owning team" control). */
   ownerOrg: string;
+  /** Pipeline state: pending | active | complete. Independent of `published`. */
+  status: string;
   title: string;
   blurb: string;
   partner: string;
@@ -536,6 +540,7 @@ export default function EditProjectPage() {
         published: project.published !== false,
         surfaces: project.surfaces?.length ? project.surfaces : ["spark"],
         ownerOrg: project.ownerOrg ?? "spark",
+        status: project.status ?? "complete",
         runs: project.runs.length
           ? project.runs.map((r) => ({
               term: r.term ?? "",
@@ -741,6 +746,7 @@ export default function EditProjectPage() {
       // Sent ONLY by a super admin. For everyone else the key is absent, so the
       // route's super-only branch never even runs. The API rejects it regardless —
       // this just avoids a pointless 403 on an ordinary save.
+      status: form.status,
       ...(actor?.isSuper ? { ownerOrg: form.ownerOrg } : {}),
       runs,
     };
@@ -1673,6 +1679,31 @@ export default function EditProjectPage() {
                   : "A PD re-sync may overwrite the blurb. Lock it to protect it."
               }
             />
+          </div>
+
+          {/* Pipeline status — the THIRD axis. Deliberately separate from the publish
+              toggle: a project can be complete but unpublished (finished, waiting on
+              a screenshot), or published while still active. Any admin who may edit
+              the project may move it — this is not an authority decision. */}
+          <div style={{ ...S.field, marginTop: 22 }}>
+            <label style={S.lab}>Project status</label>
+            <select
+              className="fld"
+              value={form.status}
+              onChange={(e) => set("status", e.target.value)}
+              disabled={readOnly}
+              style={{ maxWidth: 320 }}
+            >
+              {PROJECT_STATUSES.map((st) => (
+                <option key={st} value={st}>
+                  {PROJECT_STATUS_LABELS[st]}
+                </option>
+              ))}
+            </select>
+            <div style={S.hint}>
+              Where the work is, not who can see it. Publishing is controlled
+              separately below.
+            </div>
           </div>
 
           {/* Owning team — AUTHORITY, distinct from the galleries control below.

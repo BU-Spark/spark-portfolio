@@ -195,6 +195,25 @@ export const SPARK_TERMS = [
   "Spring 2024",
 ];
 
+// Where a project is in the delivery pipeline. A THIRD axis, independent of both
+// `published` (whether the public sees it) and `owner_org` (which team may edit it)
+// — a project can be complete but unpublished (finished, awaiting a screenshot), or
+// published while still active. Never derive one axis from another.
+//
+// Mirrors the projects_status_chk CHECK constraint in
+// db/migrations/002_project_status.sql. Keep the two in step: a value added here
+// and not there is rejected by the database at write time.
+export const PROJECT_STATUSES = ["pending", "active", "complete"] as const;
+
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+/** Admin-facing labels + the one-line meaning, used by the form selects. */
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  pending: "Pending — scoped, not started",
+  active: "Active — in progress",
+  complete: "Complete — work finished",
+};
+
 export const SPARK_PROJECTS: SeedProject[] = [
   {
     id: "boston-311-equity",

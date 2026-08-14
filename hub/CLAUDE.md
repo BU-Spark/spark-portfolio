@@ -51,6 +51,33 @@ Going sequential should be a deliberate choice, not the default.
   pre-filters candidates by org and the Apps Script runs as `IMPORT_ORG=spark`).
   That's intended, but it looks like a bug if you don't expect it.
 
+## Three independent axes on a project
+Never derive one from another. This has already been the source of one near-miss
+(`surfaces` was almost used as an edit boundary) and is the reason `status` exists.
+
+| Axis | Column | Question it answers |
+|---|---|---|
+| Authority | `owner_org` | which team may edit it |
+| Visibility | `published` (+ `surfaces`) | whether/where the public sees it |
+| Pipeline | `status` | where the work actually is |
+
+- `status` is `pending` \| `active` \| `complete` (`PROJECT_STATUSES` in `lib/data.ts`,
+  mirroring the `projects_status_chk` CHECK). Keep the two in step.
+- **A complete project can be unpublished** (finished, still missing a screenshot) and
+  **an active one can be public**. That combination is the whole point of the field —
+  don't add logic that couples them.
+- **Don't infer status from the latest run's term.** A past term means the semester
+  ended, not that the work finished. All 170 rows were seeded `complete` because every
+  latest run was Spring 2026 or earlier and there were no Fall 2026 runs at all.
+- `002_project_status.sql` uses two defaults deliberately: `ADD COLUMN … DEFAULT
+  'complete'` backfills existing rows, then `SET DEFAULT 'pending'` applies to future
+  inserts only. That replaces a backfill `UPDATE` and avoids a table rewrite.
+- `status` is **absent from the merge UPDATE on purpose** — the survivor keeps its own.
+  Unlike `surfaces` (a set, which had to become a union), there is no sensible merge of
+  `active` with `complete`.
+- The importer never sets it, and it's excluded from `addProject`'s `DO UPDATE`, so a
+  re-synced tracker row can't drag a project an admin moved to `active` back again.
+
 ## Approvals queue + weekly Slack digest
 - `/admin/approvals` is a **worklist**, so it shows only rows the actor can act on
   (supers see all) — unlike `/admin/projects`, where foreign rows stay visible so a

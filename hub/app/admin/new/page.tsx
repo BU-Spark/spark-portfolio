@@ -11,6 +11,8 @@ import {
   SPARK_CLIENT_TYPES,
   SPARK_TERMS,
   disciplineFromCourse,
+  PROJECT_STATUSES,
+  PROJECT_STATUS_LABELS,
 } from "@/lib/data";
 // Discipline/client-type vocab is admin-configurable (see /admin/settings); the
 // constants above are only the initial fallback until /api/settings loads.
@@ -85,6 +87,7 @@ interface FormState {
   team: string[]; // students (admin-only — not shown publicly)
   images: (string | null)[]; // S3 object keys
   publish: boolean; // publish immediately vs. save as draft
+  status: string; // pipeline state — independent of `publish` (see PROJECT_STATUSES)
 }
 
 const BLANK: FormState = {
@@ -103,6 +106,7 @@ const BLANK: FormState = {
   team: [],
   images: [null, null, null, null],
   publish: true,
+  status: "pending",
 };
 
 export default function AddProjectPage() {
@@ -207,6 +211,7 @@ export default function AddProjectPage() {
       tech: form.tech,
       images: form.images.filter(Boolean),
       published: form.publish,
+      status: form.status,
       runs: [
         {
           term: form.term,
@@ -561,6 +566,33 @@ export default function AddProjectPage() {
                 borderTop: "1px solid var(--line)",
               }}
             >
+              <div
+                style={{ marginBottom: 18 }}
+              >
+                <label
+                  htmlFor="status"
+                  style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}
+                >
+                  Project status
+                </label>
+                <select
+                  id="status"
+                  className="fld"
+                  value={form.status}
+                  onChange={(e) => set("status")(e.target.value)}
+                  style={{ maxWidth: 320 }}
+                >
+                  {PROJECT_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12.5, color: "var(--ink-4)", marginTop: 4 }}>
+                  Where the work is. Separate from publishing below — a complete
+                  project can stay unpublished, and an active one can be public.
+                </div>
+              </div>
               <div
                 style={{
                   display: "flex",

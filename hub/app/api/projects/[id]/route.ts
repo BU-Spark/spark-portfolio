@@ -16,7 +16,7 @@ import {
 } from "@/lib/db";
 import { ORGS } from "@/lib/authz";
 import type { Run } from "@/lib/types";
-import { disciplineFromCourse, SURFACE_KEYS } from "@/lib/data";
+import { disciplineFromCourse, SURFACE_KEYS, PROJECT_STATUSES } from "@/lib/data";
 import { publishBlockers } from "@/lib/project";
 
 export async function GET(
@@ -91,6 +91,17 @@ export async function PATCH(
   if (Array.isArray(body.surfaces)) {
     const s = (body.surfaces as unknown[]).map(String).filter((v) => SURFACE_KEYS.includes(v));
     patch.surfaces = s.length ? [...new Set(s)] : ["spark"];
+  }
+  // Pipeline state. Validated against the vocabulary so an unknown value is a
+  // clean 400 rather than a CHECK-constraint 500. Not super-gated and not tied to
+  // `published`: marking work complete is not a visibility decision, and a complete
+  // project can legitimately stay unpublished while it waits for a screenshot.
+  if (body.status !== undefined) {
+    const next = String(body.status).trim();
+    if (!PROJECT_STATUSES.includes(next as never)) {
+      return Response.json({ error: "Unknown project status." }, { status: 400 });
+    }
+    patch.status = next;
   }
   if (Array.isArray(body.topics))
     patch.topics = (body.topics as unknown[])

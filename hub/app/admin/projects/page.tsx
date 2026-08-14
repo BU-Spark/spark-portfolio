@@ -27,6 +27,7 @@ import ConfirmModal from "@/components/admin/ConfirmModal";
 import MergeProjectsModal from "@/components/admin/MergeProjectsModal";
 import FilterBar from "@/components/admin/FilterBar";
 import { useHotkey } from "@/components/admin/useHotkey";
+import { PROJECT_STATUSES, PROJECT_STATUS_LABELS, type ProjectStatus } from "@/lib/data";
 
 // Short uppercase code shown on the discipline cover tile (e.g. DATAVIZ, ML).
 function disciplineAbbr(d: string): string {
@@ -58,6 +59,7 @@ interface StoredFilters {
   tpmFilter: string;
   termFilter: string;
   disciplineFilter: string;
+  statusFilter: string;
   gapIncludes: string[];
   gapExcludes: string[];
   gapMode: "all" | "any";
@@ -98,6 +100,7 @@ export default function ManageProjectsPage() {
   const [tpmFilter, setTpmFilter] = useState("");
   const [termFilter, setTermFilter] = useState("");
   const [disciplineFilter, setDisciplineFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [gapIncludes, setGapIncludes] = useState<Set<string>>(new Set());
   const [gapExcludes, setGapExcludes] = useState<Set<string>>(new Set());
   // How multiple "missing X" (include) chips combine: "all" = AND (missing every
@@ -181,6 +184,10 @@ export default function ManageProjectsPage() {
           if (typeof s.tpmFilter === "string") setTpmFilter(s.tpmFilter);
           if (typeof s.termFilter === "string") setTermFilter(s.termFilter);
           if (typeof s.disciplineFilter === "string") setDisciplineFilter(s.disciplineFilter);
+          // Validated against the vocabulary: a stale value would filter every row
+          // out and render no chip to clear it with.
+          if (s.statusFilter === "" || (PROJECT_STATUSES as readonly string[]).includes(s.statusFilter ?? ""))
+            setStatusFilter(s.statusFilter ?? "");
           // Gap chips are validated against the current vocabulary — a renamed field
           // would otherwise restore a chip that matches nothing and can't be cleared
           // from the UI, since no chip renders for an unknown value.
@@ -219,6 +226,7 @@ export default function ManageProjectsPage() {
       tpmFilter,
       termFilter,
       disciplineFilter,
+      statusFilter,
       gapIncludes: [...gapIncludes],
       gapExcludes: [...gapExcludes],
       gapMode,
@@ -237,6 +245,7 @@ export default function ManageProjectsPage() {
     tpmFilter,
     termFilter,
     disciplineFilter,
+    statusFilter,
     gapIncludes,
     gapExcludes,
     gapMode,
@@ -507,6 +516,7 @@ export default function ManageProjectsPage() {
     setTpmFilter("");
     setTermFilter("");
     setDisciplineFilter("");
+    setStatusFilter("");
     setGapIncludes(new Set());
     setGapExcludes(new Set());
     setGapMode("all");
@@ -525,6 +535,7 @@ export default function ManageProjectsPage() {
     (tpmFilter ? 1 : 0) +
     (termFilter ? 1 : 0) +
     (disciplineFilter ? 1 : 0) +
+    (statusFilter ? 1 : 0) +
     gapIncludes.size +
     gapExcludes.size;
 
@@ -539,6 +550,8 @@ export default function ManageProjectsPage() {
       if (tpmFilter && canonical(p.tpm) !== tpmFilter) return false;
       if (termFilter && !projectTerms(p).includes(termFilter)) return false;
       if (disciplineFilter && !p.runs.some((r) => r.discipline === disciplineFilter)) return false;
+      // Default "complete" mirrors rowToProject, so pre-migration rows read consistently.
+      if (statusFilter && (p.status ?? "complete") !== statusFilter) return false;
       const missing = missingInfo(p);
       if (gapIncludes.size) {
         const inc = [...gapIncludes];
@@ -762,6 +775,21 @@ export default function ManageProjectsPage() {
           <div className="filterpanel">
             {/* Dropdown filters — labeled grid */}
             <div className="filtergrid">
+              <div className="filteritem">
+                <label className="lab">Status</label>
+                <select
+                  className="fld"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="">Any status</option>
+                  {PROJECT_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="filteritem">
                 <label className="lab">Term</label>
                 <select className="fld" value={termFilter} onChange={(e) => setTermFilter(e.target.value)}>
@@ -1327,6 +1355,22 @@ export default function ManageProjectsPage() {
                       <span className="rec-ttl">{p.title}</span>
                       {p.featured && (
                         <span className="badge b-teal" title="Featured on the gallery">★ featured</span>
+                      )}
+                      {/* Pipeline status. Only the in-flight states are badged: every
+                          existing project is 'complete', so badging that would put an
+                          identical pill on all 170 rows and carry no information. */}
+                      {(p.status ?? "complete") !== "complete" && (
+                        <span
+                          className="badge"
+                          title={PROJECT_STATUS_LABELS[(p.status ?? "complete") as ProjectStatus]}
+                          style={
+                            p.status === "active"
+                              ? { color: "#0369a1", background: "#0369a114", border: "1px solid #0369a144" }
+                              : { color: "#92400e", background: "#92400e14", border: "1px solid #92400e44" }
+                          }
+                        >
+                          {p.status}
+                        </span>
                       )}
                       {p.pdUrl && !p.blurb?.trim() && (
                         <span

@@ -112,6 +112,10 @@ export async function POST(req: Request) {
     // other team. addProject also derives `surfaces` from this, so a CDS admin's
     // project lands in the CDS gallery rather than defaulting to Spark's.
     ownerOrg: g.actor.org,
+    // A brand-new project is scoped before it is worked on, so default to
+    // 'pending' — but let the create form say otherwise, since projects are often
+    // entered mid-semester when work is already under way. addProject validates it.
+    status: typeof body.status === "string" ? body.status : "pending",
   };
 
   await addProject(project);

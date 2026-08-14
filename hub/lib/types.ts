@@ -68,6 +68,12 @@ export interface Project {
   // Never derive one from the other: every cds-tagged project is also spark-tagged,
   // so surfaces cannot express an edit boundary. See lib/authz.ts.
   ownerOrg?: string; // owning team: "spark" | "cds" (default "spark")
+  // PIPELINE state — the third axis, independent of `published` (visibility) and
+  // `ownerOrg` (authority). "pending" | "active" | "complete"; see PROJECT_STATUSES.
+  // A project can be complete but unpublished (finished, missing a screenshot), or
+  // published while active. Don't infer it from the latest run's term either: a past
+  // term means the semester ended, not that the work was finished.
+  status?: string;
   custom?: boolean; // admin-added flag
   // DERIVED, ADMIN-ONLY: number of student contributors on this project. Set only
   // by getProjectsForList() (the admin list projection); undefined on public
