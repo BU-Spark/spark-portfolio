@@ -129,11 +129,13 @@ CREATE TABLE IF NOT EXISTS projects (
   client_desc text,
   surfaces text[] NOT NULL DEFAULT '{spark}'::text[],
   owner_org text NOT NULL DEFAULT 'spark'::text,
-  status text NOT NULL DEFAULT 'pending'::text
+  status text NOT NULL DEFAULT 'pending'::text,
+  visibility text NOT NULL DEFAULT 'hidden'::text
 );
 ALTER TABLE projects ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
 ALTER TABLE projects ADD CONSTRAINT projects_owner_org_chk CHECK ((owner_org = ANY (ARRAY['spark'::text, 'cds'::text])));
 ALTER TABLE projects ADD CONSTRAINT projects_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'complete'::text])));
+ALTER TABLE projects ADD CONSTRAINT projects_visibility_chk CHECK ((visibility = ANY (ARRAY['hidden'::text, 'internal'::text, 'public'::text])));
 CREATE INDEX idx_projects_listing ON public.projects USING btree (published, featured, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (

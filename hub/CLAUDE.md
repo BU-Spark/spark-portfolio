@@ -58,7 +58,7 @@ Never derive one from another. This has already been the source of one near-miss
 | Axis | Column | Question it answers |
 |---|---|---|
 | Authority | `owner_org` | which team may edit it |
-| Visibility | `published` (+ `surfaces`) | whether/where the public sees it |
+| Visibility | `visibility` (+ `surfaces`) | whether/where the public sees it |
 | Pipeline | `status` | where the work actually is |
 
 - `status` is `pending` \| `active` \| `complete` (`PROJECT_STATUSES` in `lib/data.ts`,
@@ -77,6 +77,33 @@ Never derive one from another. This has already been the source of one near-miss
   `active` with `complete`.
 - The importer never sets it, and it's excluded from `addProject`'s `DO UPDATE`, so a
   re-synced tracker row can't drag a project an admin moved to `active` back again.
+
+## The gallery is OPT-IN (`visibility`)
+`hidden` (draft) → `internal` (ready, staff-only) → `public` (live). `VISIBILITIES` in
+`lib/data.ts` mirrors `projects_visibility_chk`.
+
+- **Public reads filter `visibility = 'public'`, never `<> 'hidden'`.** The second form
+  would leak all 140 `internal` projects onto the anonymous gallery. `getProjects`/
+  `getProject` are `unstable_cache`d under a shared key, so they must stay
+  session-independent — a viewer-aware read belongs in its own uncached function, or
+  one visitor's payload becomes every visitor's.
+- `published` is now **derived** (`visibility !== 'hidden'`) on the `Project` type, so
+  the admin UI's draft/not-draft concept keeps working off one source of truth. It does
+  NOT mean "publicly visible" — an `internal` project has `published === true`.
+- The DB column `published` is **still written** (expand-contract: the migration and
+  the Worker deploy aren't atomic, so a code rollback must still find a correct
+  boolean). `updateProject` handles both in one branch so they can't diverge. Don't
+  read it in new code; a later migration drops it.
+- **Legacy boolean writes never promote to `public` and never demote from it.** `true`
+  maps to `internal` via a SQL `CASE` that preserves an existing `public` — otherwise
+  hide-then-show would quietly pull a live project off the gallery.
+- 140 projects became `internal`, not `public`: `published = true` only ever meant "the
+  data looked complete enough", never "someone opted in". **The public gallery is empty
+  until someone opts projects in** — that's the intended launch posture, and
+  `003_visibility.sql` carries the one-line SQL to bulk-publish instead.
+- `internal` projects are previewed at `/admin/projects/<id>`, which already mirrors the
+  public layout. They are deliberately **not** in the approvals queue — 140 rows would
+  bury the handful someone can actually clear.
 
 ## Approvals queue + weekly Slack digest
 - `/admin/approvals` is a **worklist**, so it shows only rows the actor can act on

@@ -214,6 +214,33 @@ export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   complete: "Complete — work finished",
 };
 
+// Who can see a project. Widened from the old `published` boolean so the gallery can
+// be OPT-IN: "ready" and "live" are different states, and a boolean cannot hold both.
+//
+//   hidden    draft — not finished; only the admin area shows it
+//   internal  ready, not opted in. Staff preview it at /admin/projects/<id>, which
+//             already mirrors the public layout.
+//   public    opted in — live on the gallery
+//
+// Mirrors projects_visibility_chk in db/migrations/003_visibility.sql. Order matters
+// here: it is least → most visible, and the admin select renders in this order.
+export const VISIBILITIES = ["hidden", "internal", "public"] as const;
+
+export type Visibility = (typeof VISIBILITIES)[number];
+
+export const VISIBILITY_LABELS: Record<Visibility, string> = {
+  hidden: "Draft — not finished",
+  internal: "Ready — staff only, not on the gallery",
+  public: "Public — live on the gallery",
+};
+
+/** Short label for list badges. */
+export const VISIBILITY_SHORT: Record<Visibility, string> = {
+  hidden: "draft",
+  internal: "ready",
+  public: "public",
+};
+
 export const SPARK_PROJECTS: SeedProject[] = [
   {
     id: "boston-311-equity",

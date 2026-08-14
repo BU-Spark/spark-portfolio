@@ -16,7 +16,12 @@ import {
 } from "@/lib/db";
 import { ORGS } from "@/lib/authz";
 import type { Run } from "@/lib/types";
-import { disciplineFromCourse, SURFACE_KEYS, PROJECT_STATUSES } from "@/lib/data";
+import {
+  disciplineFromCourse,
+  SURFACE_KEYS,
+  PROJECT_STATUSES,
+  VISIBILITIES,
+} from "@/lib/data";
 import { publishBlockers } from "@/lib/project";
 
 export async function GET(
@@ -92,6 +97,16 @@ export async function PATCH(
     const s = (body.surfaces as unknown[]).map(String).filter((v) => SURFACE_KEYS.includes(v));
     patch.surfaces = s.length ? [...new Set(s)] : ["spark"];
   }
+  // Visibility: hidden | internal | public. Validated so an unknown value is a clean
+  // 400 rather than a CHECK-constraint 500. updateProject keeps the legacy `published`
+  // boolean in step, so callers must send one or the other, never both.
+  if (body.visibility !== undefined) {
+    const next = String(body.visibility).trim();
+    if (!VISIBILITIES.includes(next as never)) {
+      return Response.json({ error: "Unknown visibility." }, { status: 400 });
+    }
+    patch.visibility = next;
+  }
   // Pipeline state. Validated against the vocabulary so an unknown value is a
   // clean 400 rather than a CHECK-constraint 500. Not super-gated and not tied to
   // `published`: marking work complete is not a visibility decision, and a complete
@@ -161,7 +176,10 @@ export async function PATCH(
   // Server-side publish gate: if the request is enabling publish, verify the
   // merged state (current + patch) has what it needs. Mirrors the client-side
   // canPublish check so direct API calls can't bypass it.
-  if (patch.published === true) {
+  // Covers BOTH ways of leaving draft: the legacy boolean and an explicit visibility
+  // of internal/public. Gating only `published` would let a direct
+  // {"visibility":"public"} call put a blurb-less project straight on the gallery.
+  if (patch.published === true || (patch.visibility && patch.visibility !== "hidden")) {
     const current = await getProjectAdmin(id);
     if (current) {
       const mergedBlurb = patch.blurb ?? current.blurb ?? "";

@@ -116,6 +116,10 @@ export async function POST(req: Request) {
     // 'pending' — but let the create form say otherwise, since projects are often
     // entered mid-semester when work is already under way. addProject validates it.
     status: typeof body.status === "string" ? body.status : "pending",
+    // Fail-closed in addProject if absent/unknown. A newly created project is never
+    // put straight on the public gallery from here — the create form offers draft or
+    // ready, and opting in is a separate deliberate action.
+    visibility: typeof body.visibility === "string" ? body.visibility : undefined,
   };
 
   await addProject(project);
