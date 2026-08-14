@@ -2767,6 +2767,74 @@ export async function backlogCounts(scope: {
   return Object.fromEntries(rows.map((r) => [r.label, r.n]));
 }
 
+// --- PD completion submissions -------------------------------------------------
+// One row per end-of-semester form submission (see app/api/pd-complete/route.ts):
+// what was checked, what failed, and whether it was accepted. Append-only, so a
+// project that comes back twice leaves both attempts — the history is the point,
+// since "this was rejected in January and again in May" is the signal a supervisor
+// needs and a single mutable row would erase.
+let pdCompletionEnsured = false;
+async function ensurePdCompletionTable(): Promise<void> {
+  if (pdCompletionEnsured) return;
+  await query(
+    `CREATE TABLE IF NOT EXISTS pd_completions (
+       id           bigserial PRIMARY KEY,
+       project_id   text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+       org          text NOT NULL,
+       submitted_by text,
+       term         text,
+       accepted     boolean NOT NULL,
+       findings     jsonb NOT NULL DEFAULT '[]'::jsonb,
+       created_at   timestamptz NOT NULL DEFAULT now()
+     )`
+  );
+  // The queries that matter are "latest for this project" and "recent rejections".
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_pd_completions_project
+       ON pd_completions (project_id, created_at DESC)`
+  );
+  pdCompletionEnsured = true;
+}
+
+export interface PdCompletion {
+  projectId: string;
+  org: string;
+  submittedBy: string | null;
+  term: string | null;
+  accepted: boolean;
+  findings: unknown[];
+}
+
+export async function recordPdCompletion(c: PdCompletion): Promise<void> {
+  await ensurePdCompletionTable();
+  await query(
+    `INSERT INTO pd_completions (project_id, org, submitted_by, term, accepted, findings)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+    [c.projectId, c.org, c.submittedBy, c.term, c.accepted, JSON.stringify(c.findings)]
+  );
+}
+
+/** Latest submission per project, for the admin list / a future review screen. */
+export async function latestPdCompletions(
+  actor: Actor
+): Promise<Record<string, { accepted: boolean; at: string; findings: unknown[] }>> {
+  await ensurePdCompletionTable();
+  const rows = await query<{
+    project_id: string; accepted: boolean; created_at: string; findings: unknown[];
+  }>(
+    `SELECT DISTINCT ON (c.project_id)
+            c.project_id, c.accepted, c.created_at, c.findings
+       FROM pd_completions c
+       JOIN projects p ON p.id = c.project_id
+      WHERE ($1 OR p.owner_org = $2)
+      ORDER BY c.project_id, c.created_at DESC`,
+    [actor.isSuper, actor.org]
+  );
+  return Object.fromEntries(
+    rows.map((r) => [r.project_id, { accepted: r.accepted, at: r.created_at, findings: r.findings }])
+  );
+}
+
 let digestEnsured = false;
 async function ensureDigestTable(): Promise<void> {
   if (digestEnsured) return;

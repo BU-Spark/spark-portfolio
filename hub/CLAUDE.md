@@ -105,6 +105,33 @@ Never derive one from another. This has already been the source of one near-miss
   public layout. They are deliberately **not** in the approvals queue — 140 rows would
   bury the handful someone can actually clear.
 
+## PD completion checks (`lib/checks.ts` + `/api/pd-complete`)
+- `lib/checks.ts` is **pure** (no db/session/network) — that's what makes it testable
+  and it's also the honest boundary. Link *liveness* needs the network and lives in the
+  route, behind an opt-in `checkLinks` flag so a form submission doesn't pay for it.
+- **There is no ML here, on purpose.** The spec floated RAG/a classifier for discipline
+  tagging. Measured first: of 38 runs with no discipline, **16 already resolved under
+  the existing `disciplineFromCourse` map** (a stale-data bug, since backfilled) and the
+  other 22 are internships, which have no course discipline to infer. No residue left
+  for a model. If an unmapped course appears, add a line to that map.
+- A discipline **mismatch is reported but never auto-fixed** — the course map is a
+  heuristic and an admin may have overridden it deliberately. Only an *empty* stored
+  discipline gets an `autoFix`.
+- **Missing images is a warning, never a blocker.** All 140 ready projects have none, so
+  blocking on it would score the whole catalogue 0 and make the audit say nothing.
+- `db/audit-projects.ts` runs the checks over the live DB (read-only; `--fix-disciplines`
+  applies the mechanical backfill). It uses `pg` + pure lib modules directly, because
+  `lib/db.ts` is `server-only` and unresolvable outside Next's bundler.
+- The webhook **never changes visibility.** Accepting a completion sets `status`, and
+  putting a project on the gallery stays a separate deliberate opt-in.
+- On rejection it sets status `active`, **not** `pending` as the spec says: `pending`
+  means "scoped, not yet started", so reusing it for "submitted but rejected" would make
+  those two indistinguishable. A real "in review" state would be a fourth status.
+- `pd_completions` is **append-only** — "rejected in January and again in May" is the
+  signal a supervisor needs, and one mutable row would erase it.
+- Not built: writing suggested edits back into the PD Google Doc (needs Docs API
+  credentials + a service account with per-doc access).
+
 ## Approvals queue + weekly Slack digest
 - `/admin/approvals` is a **worklist**, so it shows only rows the actor can act on
   (supers see all) — unlike `/admin/projects`, where foreign rows stay visible so a
