@@ -3,6 +3,7 @@ import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
+import { SITE_URL } from "@/lib/site";
 
 // The prototype ships the "Grotesk" pairing: Space Grotesk (display) + IBM Plex
 // Sans (body) + IBM Plex Mono (eyebrows/labels/counts). next/font self-hosts
@@ -28,8 +29,9 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+// Canonical origin for every absolute URL Next generates from this metadata.
 export const metadata: Metadata = {
-  metadataBase: new URL("https://sparkshowcase.vercel.app"),
+  metadataBase: new URL(SITE_URL),
   title: "BU Spark! Project Gallery",
   description:
     "Browse student-built projects from BU Spark! practicums, and co-labs — searchable by discipline, program, partner, and the technologies behind each build.",

@@ -6,8 +6,9 @@ import { getProject, getProjectRedirect } from "@/lib/db";
 import { projectDisciplines } from "@/lib/project";
 import { cleanBlurb } from "@/lib/gdocs";
 import ProjectView from "@/components/ProjectView";
+import { SITE_URL } from "@/lib/site";
 
-const BASE = "https://sparkshowcase.vercel.app";
+const BASE = SITE_URL;
 
 // One-line, length-bounded description for <meta>/OG/JSON-LD (the raw blurb has
 // "•" bullets + newlines from the doc that don't belong in metadata).
