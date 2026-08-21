@@ -20,9 +20,13 @@
 // 2. It does not set status to 'pending' on failure, despite the spec saying so.
 //    'pending' means "scoped, not yet worked on" (see PROJECT_STATUSES); using it for
 //    "submitted but rejected" would make the pipeline unable to distinguish work that
-//    hasn't started from work that came back. Failure sets 'active' — the work is
-//    still outstanding — and success sets 'complete'. Flagged for Langdon; if a
-//    distinct "in review" state is wanted, that's a fourth status, not a reuse.
+//    hasn't started from work that came back. Failure sets 'in_review' — submitted,
+//    bounced, fixes outstanding — and success sets 'complete'.
+//
+//    'in_review' rather than 'active' (which is what this did before 004) because
+//    'active' loses the part a supervisor needs: that a completion claim was made and
+//    rejected. Requires db/migrations/004_status_in_review.sql to have been applied,
+//    or the CHECK rejects the write.
 import { timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { getProjectAdmin, updateProject, recordPdCompletion } from "@/lib/db";
@@ -122,7 +126,7 @@ export async function POST(req: Request) {
 
   // Status reflects the verdict; visibility is untouched. Accepting a completion form
   // must never put a project on the public gallery — that stays a deliberate opt-in.
-  await updateProject(projectId, { status: accepted ? "complete" : "active" });
+  await updateProject(projectId, { status: accepted ? "complete" : "in_review" });
   await recordPdCompletion({
     projectId,
     org,
@@ -137,7 +141,7 @@ export async function POST(req: Request) {
     ok: true,
     projectId,
     accepted,
-    status: accepted ? "complete" : "active",
+    status: accepted ? "complete" : "in_review",
     blockers: findings.filter((f) => f.severity === "blocker"),
     warnings: findings.filter((f) => f.severity === "warning"),
   });

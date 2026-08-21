@@ -86,8 +86,21 @@ Never derive one from another. This has already been the source of one near-miss
 | Visibility | `visibility` (+ `surfaces`) | whether/where the public sees it |
 | Pipeline | `status` | where the work actually is |
 
-- `status` is `pending` \| `active` \| `complete` (`PROJECT_STATUSES` in `lib/data.ts`,
-  mirroring the `projects_status_chk` CHECK). Keep the two in step.
+- `status` is `pending` \| `active` \| `in_review` \| `complete` (`PROJECT_STATUSES` in
+  `lib/data.ts`, mirroring the `projects_status_chk` CHECK). Keep the two in step.
+- **`in_review` is written by exactly one thing:** `/api/pd-complete`, on a submission
+  that failed the checks. It means "someone claimed this was done and the data
+  disagreed" — which neither `pending` ("nobody started") nor `active` ("in progress,
+  no claim made") can express. Nothing else should set it, and no UI offers it as a
+  destination for a project that hasn't been submitted.
+- `004_status_in_review.sql` **drops and re-adds** the CHECK rather than guarding on
+  `pg_constraint` like 002 did. A guard would find the existing narrow constraint and
+  do nothing, leaving the DB rejecting a value the app thinks is valid — invisible
+  until the first webhook rejection 500s. Widening an enum CHECK always means replace,
+  never add-if-absent.
+- Its rollback deliberately **fails** if any row is `in_review`, rather than rewriting
+  those rows to `active`. That row is the only record a completion was submitted and
+  bounced; a rollback script that quietly mutates data loses exactly what you needed.
 - **A complete project can be unpublished** (finished, still missing a screenshot) and
   **an active one can be public**. That combination is the whole point of the field —
   don't add logic that couples them.
@@ -149,9 +162,11 @@ Never derive one from another. This has already been the source of one near-miss
   `lib/db.ts` is `server-only` and unresolvable outside Next's bundler.
 - The webhook **never changes visibility.** Accepting a completion sets `status`, and
   putting a project on the gallery stays a separate deliberate opt-in.
-- On rejection it sets status `active`, **not** `pending` as the spec says: `pending`
+- On rejection it sets status `in_review`, **not** `pending` as the spec says: `pending`
   means "scoped, not yet started", so reusing it for "submitted but rejected" would make
-  those two indistinguishable. A real "in review" state would be a fourth status.
+  those two indistinguishable. It was `active` until `004_status_in_review.sql` added the
+  fourth status; `active` was less wrong than `pending` but still lost the signal a
+  supervisor needs — that a completion claim was made and rejected.
 - `pd_completions` is **append-only** — "rejected in January and again in May" is the
   signal a supervisor needs, and one mutable row would erase it.
 - Not built: writing suggested edits back into the PD Google Doc (needs Docs API

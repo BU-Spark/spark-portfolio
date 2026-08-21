@@ -201,9 +201,24 @@ export const SPARK_TERMS = [
 // published while still active. Never derive one axis from another.
 //
 // Mirrors the projects_status_chk CHECK constraint in
-// db/migrations/002_project_status.sql. Keep the two in step: a value added here
-// and not there is rejected by the database at write time.
-export const PROJECT_STATUSES = ["pending", "active", "complete"] as const;
+// db/migrations/002_project_status.sql, as widened by 004_status_in_review.sql.
+// Keep the two in step: a value added here and not there is rejected by the
+// database at write time.
+//
+// Order is pipeline order, and the admin selects render in it.
+//
+//   pending    scoped, not yet worked on
+//   active     currently being worked on, no completion claimed
+//   in_review  a PM submitted the completion form and it did NOT pass the checks
+//   complete   submitted and passed
+//
+// `in_review` exists because `active` and `pending` both fail to describe a bounced
+// submission. `pending` means "not started" — reusing it would erase the difference
+// between work nobody has begun and work someone believes is finished. `active` means
+// "in progress" and loses the fact that a claim was made and rejected, which is the
+// part a supervisor needs: it distinguishes a project nobody has looked at from one
+// whose PM thinks it is done while the data says otherwise.
+export const PROJECT_STATUSES = ["pending", "active", "in_review", "complete"] as const;
 
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
@@ -211,7 +226,16 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
   pending: "Pending — scoped, not started",
   active: "Active — in progress",
+  in_review: "In review — completion submitted, checks failed",
   complete: "Complete — work finished",
+};
+
+/** Short form for badges, where the full label is too long. */
+export const PROJECT_STATUS_SHORT: Record<ProjectStatus, string> = {
+  pending: "pending",
+  active: "active",
+  in_review: "in review",
+  complete: "complete",
 };
 
 // Who can see a project. Widened from the old `published` boolean so the gallery can

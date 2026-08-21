@@ -76,7 +76,9 @@ export interface Project {
   // so surfaces cannot express an edit boundary. See lib/authz.ts.
   ownerOrg?: string; // owning team: "spark" | "cds" (default "spark")
   // PIPELINE state — the third axis, independent of `published` (visibility) and
-  // `ownerOrg` (authority). "pending" | "active" | "complete"; see PROJECT_STATUSES.
+  // `ownerOrg` (authority). "pending" | "active" | "in_review" | "complete"; see
+  // PROJECT_STATUSES. `in_review` is only ever set by /api/pd-complete, on a submission
+  // that failed the checks — it means "someone claimed this was done and it wasn't".
   // A project can be complete but unpublished (finished, missing a screenshot), or
   // published while active. Don't infer it from the latest run's term either: a past
   // term means the semester ended, not that the work was finished.

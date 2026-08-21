@@ -27,7 +27,7 @@ import ConfirmModal from "@/components/admin/ConfirmModal";
 import MergeProjectsModal from "@/components/admin/MergeProjectsModal";
 import FilterBar from "@/components/admin/FilterBar";
 import { useHotkey } from "@/components/admin/useHotkey";
-import { PROJECT_STATUSES, PROJECT_STATUS_LABELS, type ProjectStatus, VISIBILITIES, VISIBILITY_LABELS } from "@/lib/data";
+import { PROJECT_STATUSES, PROJECT_STATUS_LABELS, PROJECT_STATUS_SHORT, type ProjectStatus, VISIBILITIES, VISIBILITY_LABELS } from "@/lib/data";
 
 // Short uppercase code shown on the discipline cover tile (e.g. DATAVIZ, ML).
 function disciplineAbbr(d: string): string {
@@ -67,6 +67,21 @@ interface StoredFilters {
 }
 
 // Gap chips offered in the FilterBar (Course added per audit).
+// Pipeline-status badge colour. One entry per status so a fifth one can't silently
+// inherit another's colour: the previous binary "active is blue, anything else amber"
+// made in_review look identical to pending, which is the exact distinction it exists
+// to draw. `complete` is here for completeness but never rendered — see the call site.
+const STATUS_BADGE: Record<ProjectStatus, { color: string }> = {
+  pending: { color: "#92400e" },   // amber — nobody has started
+  active: { color: "#0369a1" },    // blue — in flight
+  in_review: { color: "#7c3aed" }, // violet — claimed done, checks disagreed
+  complete: { color: "#15803d" },  // green
+};
+function statusBadgeStyle(status: ProjectStatus | undefined) {
+  const { color } = STATUS_BADGE[status ?? "complete"] ?? STATUS_BADGE.pending;
+  return { color, background: `${color}14`, border: `1px solid ${color}44` };
+}
+
 const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Contributors"] as const;
 
 // Compact pill label for each missingInfo() field shown next to a row title.
@@ -1390,13 +1405,9 @@ export default function ManageProjectsPage() {
                         <span
                           className="badge"
                           title={PROJECT_STATUS_LABELS[(p.status ?? "complete") as ProjectStatus]}
-                          style={
-                            p.status === "active"
-                              ? { color: "#0369a1", background: "#0369a114", border: "1px solid #0369a144" }
-                              : { color: "#92400e", background: "#92400e14", border: "1px solid #92400e44" }
-                          }
+                          style={statusBadgeStyle(p.status as ProjectStatus)}
                         >
-                          {p.status}
+                          {PROJECT_STATUS_SHORT[(p.status ?? "complete") as ProjectStatus]}
                         </span>
                       )}
                       {p.pdUrl && !p.blurb?.trim() && (
