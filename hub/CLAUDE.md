@@ -2,13 +2,38 @@
 
 Next.js 15 (App Router) + TS + React 19 gallery/admin for BU Spark! projects.
 Backend is **live**: Railway Postgres (`pg`) + Railway S3 + Auth.js (Google OAuth,
-`@bu.edu` allowlist). Repo `UgaTheDev/sparkshowcase`, deployed on Vercel at
-sparkshowcase.vercel.app. Design is inline-style; fonts are IBM Plex Sans (body)
-and Space Grotesk (display/bold).
+`@bu.edu` allowlist). Repo is the `BU-Spark/spark-portfolio` monorepo, this app in
+`hub/`. Design is inline-style; fonts are IBM Plex Sans (body) and Space Grotesk
+(display/bold).
+
+## Where this actually runs (measured 2026-08-21)
+Two deployment targets exist and **they disagree**. Check before assuming.
+
+| | State |
+|---|---|
+| `sparkshowcase.vercel.app` | **LIVE**, serving all 140 projects publicly, on **old code** (`/api/digest/weekly` and `/api/pd-complete` both 404) |
+| `hub.buspark.io` / `int.hub.buspark.io` | **no DNS record** (NOERROR, zero answers) — never successfully deployed |
+
+`hub/` is built for Cloudflare Workers: `wrangler.jsonc` (prod) / `wrangler.int.jsonc`
+(int), `@opennextjs/cloudflare`, Hyperdrive, and `"custom_domain": true` — which
+creates the DNS record *on deploy*, so a missing record means `wrangler deploy` has
+not run. There is no `hub/.vercel`; `npm run deploy` is `wrangler deploy`.
+
+**Consequence, and the trap:** the DB can be in the intended state while users see
+something else. `visibility` only takes effect once code that filters on it is
+serving traffic — the deployed query is the boundary, never the column. The legacy
+`published` boolean is still dual-written for exactly this reason (see the gallery
+section below), which is why old code keeps working and why "the DB is right" is not
+the same claim as "the public sees the right thing".
 
 ## Hard rules
-- **Commit as `kush.zingade@gmail.com`** (`git -c user.email=…`) or Vercel deploys stall.
-- **Never paste secrets in chat.** Use `.env.local` (gitignored) + Vercel env vars.
+- **Commit as `kush.zingade@gmail.com`** (`git -c user.email=…`) or the Vercel deploy
+  of `sparkshowcase` stalls. Still load-bearing while that project is live.
+- **Never paste secrets in chat.** Use `.env.local` (gitignored) locally, and
+  `wrangler secret put` / the Cloudflare dashboard for the Workers. A secret pasted
+  into a message is in the transcript and on disk before anyone reads it — hand it
+  over via a mode-`600` file outside the repo, or set it in the shell so the value
+  never enters a conversation (`gh secret set X --body "$TOK"`).
 - **Students and Team IDs are admin-only** — never render them publicly or include
   them in any public payload/projection.
 - `.env.local`, CSVs, and `course-discipline.json` are gitignored — don't commit them.
