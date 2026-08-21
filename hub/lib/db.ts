@@ -16,7 +16,13 @@ import type {
   Person,
   Contributor,
 } from "./types";
-import { DEFAULT_GALLERY_SETTINGS, disciplineFromCourse, SURFACE_KEYS } from "./data";
+import {
+  DEFAULT_GALLERY_SETTINGS,
+  disciplineFromCourse,
+  SURFACE_KEYS,
+  PROJECT_STATUSES,
+  VISIBILITIES,
+} from "./data";
 import { deleteObject } from "./s3";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
@@ -130,8 +136,10 @@ interface ProjectRow {
   featured: boolean;
   custom: boolean;
   published: boolean;
+  visibility: string | null;
   surfaces: string[] | null;
   owner_org: string | null;
+  status: string | null;
   repo_url: string | null;
   prod_url: string | null;
   code_private: boolean;
@@ -215,7 +223,11 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
     images: (r.images ?? []).map(imageUrl),
     featured: r.featured,
     custom: r.custom,
-    published: r.published,
+    // visibility is the source of truth; `published` is derived from it so the
+    // admin UI's draft/not-draft concept has exactly one backing field. Falls back
+    // to the legacy boolean only for a row written before 003 by old code.
+    visibility: r.visibility ?? (r.published ? "internal" : "hidden"),
+    published: r.visibility ? r.visibility !== "hidden" : r.published,
     repoUrl: r.repo_url,
     prodUrl: r.prod_url ?? null,
     // Public-safe operational fields (no PII).
@@ -231,6 +243,10 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
     // every ownerOrg would be undefined, the importer's candidate index would be
     // empty, and the PD sync would silently stop matching anything at all.
     ownerOrg: r.owner_org ?? "spark",
+    // Pipeline state. Also unconditional: it is not PII (a status is not a person),
+    // and gating it would repeat the ownerOrg landmine above, where a field the
+    // importer needs silently reads `undefined` through the public projection.
+    status: r.status ?? "complete",
     topics: r.topics ?? [],
     datasets: r.datasets ?? [],
     runs,
@@ -238,7 +254,7 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
 }
 
 const COLS =
-  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, repo_url, prod_url, code_private, client_url, client_desc, surfaces, owner_org, topics, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
+  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, visibility, repo_url, prod_url, code_private, client_url, client_desc, surfaces, owner_org, status, topics, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
 
 // PUBLIC reads — only published projects, private run fields stripped. Cached in
 // the Next data cache and tagged "projects" so every visitor doesn't trigger a
@@ -248,7 +264,14 @@ const COLS =
 export const getProjects = unstable_cache(
   async (): Promise<Project[]> => {
     const rows = await query<ProjectRow>(
-      `SELECT ${COLS} FROM projects WHERE published = true ORDER BY featured DESC, custom DESC, created_at DESC, title ASC`
+      // OPT-IN: only 'public'. Not "<> 'hidden'" — that would leak every `internal`
+      // project (ready, deliberately not opted in) onto the anonymous gallery, which
+      // is the whole distinction 003 introduced.
+      //
+      // This function stays cached under a shared key and MUST remain
+      // session-independent. A viewer-aware variant belongs in its own uncached
+      // function, or one visitor's payload becomes every visitor's.
+      `SELECT ${COLS} FROM projects WHERE visibility = 'public' ORDER BY featured DESC, custom DESC, created_at DESC, title ASC`
     );
     return rows.map((r) => rowToProject(r));
   },
@@ -259,7 +282,9 @@ export const getProjects = unstable_cache(
 export const getProject = unstable_cache(
   async (id: string): Promise<Project | null> => {
     const rows = await query<ProjectRow>(
-      `SELECT ${COLS} FROM projects WHERE id = $1 AND published = true`,
+      // 'public' only — same reasoning as getProjects above. An `internal` project
+      // 404s here and is previewed at /admin/projects/<id> instead.
+      `SELECT ${COLS} FROM projects WHERE id = $1 AND visibility = 'public'`,
       [id]
     );
     return rows[0] ? rowToProject(rows[0]) : null;
@@ -272,7 +297,7 @@ export const getProject = unstable_cache(
 // getProjectAdmin returns the full record (students/teamId) for the edit form.
 export async function getAllProjects(): Promise<Project[]> {
   const rows = await query<ProjectRow>(
-    `SELECT ${COLS} FROM projects ORDER BY published ASC, featured DESC, created_at DESC, title ASC`
+    `SELECT ${COLS} FROM projects ORDER BY visibility ASC, featured DESC, created_at DESC, title ASC`
   );
   return rows.map((r) => rowToProject(r));
 }
@@ -328,7 +353,7 @@ export async function getProjectRuns(id: string): Promise<Run[]> {
 // projection so the importer's catalog reads carry no extra PII.
 export async function getProjectsForList(): Promise<Project[]> {
   const rows = await query<ProjectRow>(
-    `SELECT ${COLS} FROM projects ORDER BY published ASC, featured DESC, created_at DESC, title ASC`
+    `SELECT ${COLS} FROM projects ORDER BY visibility ASC, featured DESC, created_at DESC, title ASC`
   );
   // Attach the derived (admin-only) student-contributor count so the admin list
   // can flag "no contributors" the same way it flags other missingInfo() gaps.
@@ -363,6 +388,12 @@ export interface NewProject {
    *  promotion, the inbox row's org) — never a client-supplied value. Omitted
    *  falls back to the DB default 'spark', which is fail-closed. */
   ownerOrg?: string;
+  /** Pipeline state. Omitted falls back to the DB default 'pending' — a new
+   *  project is scoped before it is worked on. */
+  status?: string;
+  /** Visibility. Omitted falls back to 'hidden', which is fail-closed: a create
+   *  path that forgets this makes a draft, never something public. */
+  visibility?: string;
 }
 
 // Normalize a contacts list for storage: trim name/email, drop rows that are
@@ -429,14 +460,25 @@ export async function addProject(p: NewProject): Promise<void> {
   // CHECK constraint — an unknown org here should become an ordinary Spark project,
   // not a failed insert on the admin's create form.
   const ownerOrg = ORGS.includes((p.ownerOrg ?? "") as never) ? (p.ownerOrg as string) : "spark";
+  // Visibility is the source of truth. `published` is written alongside it purely so
+  // a code rollback still finds a correct boolean (see 003_visibility.sql) — deriving
+  // it here rather than accepting it separately is what stops the two from drifting.
+  // A caller that passes only the legacy `published` still works: true means "ready",
+  // which is 'internal', NOT 'public'. Nothing becomes publicly visible by accident.
+  const visibility = VISIBILITIES.includes((p.visibility ?? "") as never)
+    ? (p.visibility as string)
+    : p.published === true
+      ? "internal"
+      : "hidden";
   await query(
     `INSERT INTO projects
-       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts, owner_org, surfaces)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17,$18)
+       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts, owner_org, surfaces, status, visibility)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17,$18,$19,$20)
      ON CONFLICT (id) DO UPDATE SET
        title=EXCLUDED.title, blurb=EXCLUDED.blurb, client_type=EXCLUDED.client_type,
        partner=EXCLUDED.partner, tech=EXCLUDED.tech, images=EXCLUDED.images,
        featured=EXCLUDED.featured, published=EXCLUDED.published,
+       visibility=EXCLUDED.visibility,
        repo_url=EXCLUDED.repo_url, runs=EXCLUDED.runs,
        prod_url=EXCLUDED.prod_url, pd_url=EXCLUDED.pd_url`,
     // contact/contacts intentionally omitted from DO UPDATE: the importer/inbox
@@ -446,6 +488,10 @@ export async function addProject(p: NewProject): Promise<void> {
     // owner_org and surfaces are omitted from DO UPDATE for the same reason and a
     // sharper one: an id collision must never silently transfer a project to
     // another team, nor reset the galleries an admin deliberately chose.
+    //
+    // status is omitted too: the importer re-sends every tracker row on every sync,
+    // so including it would drag a project an admin had moved to 'active' back to
+    // whatever the feed implies, every single run.
     [
       p.id,
       p.title,
@@ -456,7 +502,7 @@ export async function addProject(p: NewProject): Promise<void> {
       p.images,
       p.featured ?? false,
       p.custom ?? true,
-      p.published ?? true,
+      visibility !== "hidden",
       p.repoUrl ?? null,
       JSON.stringify(cleanRuns(p.runs)),
       p.contact ?? null,
@@ -469,6 +515,10 @@ export async function addProject(p: NewProject): Promise<void> {
       // SPARK gallery and nowhere a CDS admin would think to look for it. A super
       // admin can still add the other gallery afterwards.
       [ownerOrg],
+      // Validated like ownerOrg above: an unknown value becomes the honest default
+      // rather than a failed insert on the admin's create form.
+      PROJECT_STATUSES.includes((p.status ?? "") as never) ? (p.status as string) : "pending",
+      visibility,
     ]
   );
 }
@@ -489,6 +539,14 @@ export interface ProjectPatch {
   clientUrl?: string | null;
   clientDesc?: string | null;
   surfaces?: string[];
+  /** Visibility: hidden | internal | public. Setting this also updates the legacy
+   *  `published` boolean, so never patch `published` and `visibility` together. */
+  visibility?: string;
+  // Pipeline state. Unlike ownerOrg — which is authority and so lives behind its own
+  // super-gated setter — status is ordinary editable metadata: any admin who may
+  // edit the project may move it. Safe on ProjectPatch even though runImport shares
+  // this interface, because the importer never sets it (see addProject).
+  status?: string;
   topics?: string[];
   datasets?: ProjectDataset[];
   pdUrl?: string | null; // admin-only PD doc link (distinct from prodUrl)
@@ -566,7 +624,34 @@ export async function updateProject(id: string, patch: ProjectPatch): Promise<vo
     add("class_instructors", cleaned);
   }
   if (patch.featured !== undefined) add("featured", patch.featured);
-  if (patch.published !== undefined) add("published", patch.published);
+  // Visibility, and the legacy boolean it supersedes. Handled as ONE branch so the
+  // two columns cannot diverge — see 003_visibility.sql for why `published` is still
+  // written at all.
+  if (patch.visibility !== undefined && VISIBILITIES.includes(patch.visibility as never)) {
+    add("visibility", patch.visibility);
+    add("published", patch.visibility !== "hidden");
+  } else if (patch.published !== undefined) {
+    // Legacy boolean callers. Two rules, both load-bearing:
+    //
+    //  published=true  → never promotes to 'public'. Un-hiding makes a project READY;
+    //    opting it in to the gallery stays a separate, deliberate act. But it must
+    //    also not DEMOTE one that is already public, which a plain assignment would:
+    //    hide-then-show on a live project would quietly pull it off the gallery. The
+    //    CASE preserves 'public' and needs no extra read to do it.
+    //
+    //  published=false → 'hidden' unconditionally. Hiding is unambiguous.
+    add("published", patch.published);
+    if (patch.published) {
+      sets.push(`visibility = CASE WHEN visibility = 'public' THEN 'public' ELSE 'internal' END`);
+    } else {
+      add("visibility", "hidden");
+    }
+  }
+  // Validated against the vocabulary here rather than relying on the CHECK
+  // constraint: a bad value should be a clean no-op, not a 500 from Postgres.
+  if (patch.status !== undefined && PROJECT_STATUSES.includes(patch.status as never)) {
+    add("status", patch.status);
+  }
   if (patch.runs !== undefined) add("runs", JSON.stringify(cleanRuns(patch.runs)), "::jsonb");
   if (patch.blurbTerm !== undefined) add("blurb_term", patch.blurbTerm);
   if (!sets.length) return;
@@ -680,7 +765,8 @@ export async function mergeProjects(
     contact: string | null; contacts: ProjectContact[] | null;
     tech: string[] | null; images: string[] | null;
     repo_url: string | null; prod_url: string | null; drive_url: string | null;
-    tech_note: string | null; featured: boolean; published: boolean; runs: Run[] | null;
+    tech_note: string | null; featured: boolean; published: boolean;
+    visibility: string | null; runs: Run[] | null;
     surfaces: string[] | null; owner_org: string | null;
   };
 
@@ -692,7 +778,7 @@ export async function mergeProjects(
     const { rows } = await client.query<RawRow>(
       `SELECT id, title, blurb, blurb_term, blurb_locked, partner, client_type,
               contact, contacts, tech, images, repo_url, prod_url, drive_url,
-              tech_note, featured, published, runs, surfaces, owner_org
+              tech_note, featured, published, visibility, runs, surfaces, owner_org
          FROM projects WHERE id = ANY($1)
          ORDER BY id
          FOR UPDATE`,
@@ -746,6 +832,11 @@ export async function mergeProjects(
     const techNote = resolution.techNote !== undefined ? resolution.techNote : (nz(survivor.tech_note) ?? nz(absorbed.tech_note));
     const featured = resolution.featured !== undefined ? resolution.featured : survivor.featured;
     const published = resolution.published !== undefined ? resolution.published : survivor.published;
+    // Keep visibility in step with the boolean the merge modal resolved. Same
+    // non-demoting rule as updateProject: a merge must not silently pull a live
+    // project off the gallery, and it must never promote one onto it.
+    const survivorVis = survivor.visibility ?? (survivor.published ? "internal" : "hidden");
+    const visibility = !published ? "hidden" : survivorVis === "public" ? "public" : "internal";
     const contact = nz(survivor.contact) ?? nz(absorbed.contact);
 
     // Per-semester data combines automatically.
@@ -787,13 +878,20 @@ export async function mergeProjects(
          title=$1, blurb=$2, blurb_term=$3, blurb_locked=$4, partner=$5, client_type=$6,
          contact=$7, contacts=$8::jsonb, tech=$9, images=$10, repo_url=$11, prod_url=$12,
          drive_url=$13, tech_note=$14, featured=$15, published=$16, runs=$17::jsonb,
-         surfaces=$19
+         surfaces=$19, visibility=$20
        WHERE id=$18`,
       [title, blurb, blurbTerm, blurbLocked, partner, clientType, contact,
        JSON.stringify(contacts), tech, images, repoUrl, prodUrl, driveUrl, techNote,
        featured, published, JSON.stringify(runs), survivorId,
-       surfaces.length ? surfaces : ["spark"]]
+       surfaces.length ? surfaces : ["spark"], visibility]
     );
+
+    // `status` is deliberately absent from the UPDATE above, which means the
+    // survivor keeps its own. That is correct and is NOT the same omission as the
+    // surfaces bug fixed here earlier: surfaces is a set, so dropping the absorbed
+    // project's memberships lost information and had to become a union. Pipeline
+    // status is a single value — there is no defensible way to merge 'active' with
+    // 'complete', and the survivor is the record that continues to exist.
 
     // Re-point per-semester satellites to the survivor.
     await client.query(`UPDATE contributors SET project_id=$1 WHERE project_id=$2`, [survivorId, absorbedId]);
@@ -900,6 +998,14 @@ async function ensureIngestTables(): Promise<void> {
   // Keyed on (org, name_key), not name_key alone: two teams' trackers can hold a
   // project with the same normalized name, and a single-column key would make one
   // team's sync UPSERT onto the other team's inbox row.
+  //
+  // DO NOT re-add a UNIQUE index on name_key alone. Prod was found carrying the old
+  // `idx_import_inbox_name_key` again after 001 had dropped it — almost certainly
+  // because this lazy DDL ran from a pre-migration checkout against the prod
+  // DATABASE_URL in .env.local. The two indexes coexisted silently until a genuine
+  // cross-org row hit the stale one, which is a unique violation the
+  // `ON CONFLICT (org, name_key)` below cannot catch: the PD sync would 500 on that
+  // row. Re-running 001 drops it; the DROP is idempotent and safe to repeat.
   //
   // This MUST stay in step with hub/db/migrations/001_owner_org.sql — on an
   // existing DB these are no-ops, but on a FRESH one this lazy DDL is the only
@@ -2605,7 +2711,16 @@ export async function listOpenApprovals(scope: {
               END,
               p.owner_org, p.created_at
          FROM projects p
-        WHERE p.published = false AND ($1 OR p.owner_org = $2)
+        -- 'hidden' is the draft state; reads the source of truth rather than the
+        -- legacy published boolean it supersedes. Equivalent today (they are
+        -- dual-written) but it won't rot when that column is finally dropped.
+        --
+        -- Deliberately does NOT include 'internal'. Those 140 projects are the
+        -- opt-in backlog, not work waiting on a person — surfacing them here would
+        -- bury the handful of rows someone can actually clear, which is the same
+        -- anti-noise rule that keeps data gaps out of this queue. The Visibility
+        -- filter on /admin/projects is where that list belongs.
+        WHERE p.visibility = 'hidden' AND ($1 OR p.owner_org = $2)
      ) q
      ORDER BY waiting_since ASC`,
     [scope.isSuper, scope.org]
@@ -2650,6 +2765,74 @@ export async function backlogCounts(scope: {
     [scope.isSuper, scope.org]
   );
   return Object.fromEntries(rows.map((r) => [r.label, r.n]));
+}
+
+// --- PD completion submissions -------------------------------------------------
+// One row per end-of-semester form submission (see app/api/pd-complete/route.ts):
+// what was checked, what failed, and whether it was accepted. Append-only, so a
+// project that comes back twice leaves both attempts — the history is the point,
+// since "this was rejected in January and again in May" is the signal a supervisor
+// needs and a single mutable row would erase.
+let pdCompletionEnsured = false;
+async function ensurePdCompletionTable(): Promise<void> {
+  if (pdCompletionEnsured) return;
+  await query(
+    `CREATE TABLE IF NOT EXISTS pd_completions (
+       id           bigserial PRIMARY KEY,
+       project_id   text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+       org          text NOT NULL,
+       submitted_by text,
+       term         text,
+       accepted     boolean NOT NULL,
+       findings     jsonb NOT NULL DEFAULT '[]'::jsonb,
+       created_at   timestamptz NOT NULL DEFAULT now()
+     )`
+  );
+  // The queries that matter are "latest for this project" and "recent rejections".
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_pd_completions_project
+       ON pd_completions (project_id, created_at DESC)`
+  );
+  pdCompletionEnsured = true;
+}
+
+export interface PdCompletion {
+  projectId: string;
+  org: string;
+  submittedBy: string | null;
+  term: string | null;
+  accepted: boolean;
+  findings: unknown[];
+}
+
+export async function recordPdCompletion(c: PdCompletion): Promise<void> {
+  await ensurePdCompletionTable();
+  await query(
+    `INSERT INTO pd_completions (project_id, org, submitted_by, term, accepted, findings)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+    [c.projectId, c.org, c.submittedBy, c.term, c.accepted, JSON.stringify(c.findings)]
+  );
+}
+
+/** Latest submission per project, for the admin list / a future review screen. */
+export async function latestPdCompletions(
+  actor: Actor
+): Promise<Record<string, { accepted: boolean; at: string; findings: unknown[] }>> {
+  await ensurePdCompletionTable();
+  const rows = await query<{
+    project_id: string; accepted: boolean; created_at: string; findings: unknown[];
+  }>(
+    `SELECT DISTINCT ON (c.project_id)
+            c.project_id, c.accepted, c.created_at, c.findings
+       FROM pd_completions c
+       JOIN projects p ON p.id = c.project_id
+      WHERE ($1 OR p.owner_org = $2)
+      ORDER BY c.project_id, c.created_at DESC`,
+    [actor.isSuper, actor.org]
+  );
+  return Object.fromEntries(
+    rows.map((r) => [r.project_id, { accepted: r.accepted, at: r.created_at, findings: r.findings }])
+  );
 }
 
 let digestEnsured = false;

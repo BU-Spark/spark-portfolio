@@ -11,6 +11,9 @@ import {
   SPARK_CLIENT_TYPES,
   SPARK_TERMS,
   disciplineFromCourse,
+  PROJECT_STATUSES,
+  PROJECT_STATUS_LABELS,
+  VISIBILITY_LABELS,
 } from "@/lib/data";
 // Discipline/client-type vocab is admin-configurable (see /admin/settings); the
 // constants above are only the initial fallback until /api/settings loads.
@@ -84,7 +87,10 @@ interface FormState {
   tech: string[];
   team: string[]; // students (admin-only — not shown publicly)
   images: (string | null)[]; // S3 object keys
-  publish: boolean; // publish immediately vs. save as draft
+  // Visibility at creation. Never offers 'public' from here — a brand-new record
+  // has no images yet, and opting in to the gallery is a deliberate later step.
+  visibility: string;
+  status: string; // pipeline state — independent of `publish` (see PROJECT_STATUSES)
 }
 
 const BLANK: FormState = {
@@ -102,7 +108,8 @@ const BLANK: FormState = {
   tech: [],
   team: [],
   images: [null, null, null, null],
-  publish: true,
+  visibility: "internal",
+  status: "pending",
 };
 
 export default function AddProjectPage() {
@@ -206,7 +213,8 @@ export default function AddProjectPage() {
       prodUrl: form.prodUrl,
       tech: form.tech,
       images: form.images.filter(Boolean),
-      published: form.publish,
+      visibility: form.visibility,
+      status: form.status,
       runs: [
         {
           term: form.term,
@@ -231,7 +239,7 @@ export default function AddProjectPage() {
     }
     notify(
       "ok",
-      form.publish
+      true
         ? `"${form.title.trim()}" added to the gallery.`
         : `"${form.title.trim()}" saved as a draft.`
     );
@@ -562,6 +570,33 @@ export default function AddProjectPage() {
               }}
             >
               <div
+                style={{ marginBottom: 18 }}
+              >
+                <label
+                  htmlFor="status"
+                  style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}
+                >
+                  Project status
+                </label>
+                <select
+                  id="status"
+                  className="fld"
+                  value={form.status}
+                  onChange={(e) => set("status")(e.target.value)}
+                  style={{ maxWidth: 320 }}
+                >
+                  {PROJECT_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12.5, color: "var(--ink-4)", marginTop: 4 }}>
+                  Where the work is. Separate from publishing below — a complete
+                  project can stay unpublished, and an active one can be public.
+                </div>
+              </div>
+              <div
                 style={{
                   display: "flex",
                   alignItems: "flex-start",
@@ -569,40 +604,26 @@ export default function AddProjectPage() {
                   marginBottom: 18,
                 }}
               >
-                <input
-                  type="checkbox"
-                  id="pub"
-                  checked={form.publish}
-                  onChange={(e) => set("publish")(e.target.checked)}
-                  style={{
-                    accentColor: "var(--teal)",
-                    marginTop: 2,
-                    width: 16,
-                    height: 16,
-                    cursor: "pointer",
-                  }}
-                />
-                <label htmlFor="pub" style={{ cursor: "pointer" }}>
-                  <div
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: "var(--ink)",
-                    }}
-                  >
-                    Publish immediately
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12.5,
-                      color: "var(--ink-4)",
-                      marginTop: 2,
-                    }}
-                  >
-                    Uncheck to save as a draft — drafts stay hidden from the
-                    public gallery until published.
-                  </div>
+                <label
+                  htmlFor="vis"
+                  style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}
+                >
+                  Visibility
                 </label>
+                <select
+                  id="vis"
+                  className="fld"
+                  value={form.visibility}
+                  onChange={(e) => set("visibility")(e.target.value)}
+                  style={{ maxWidth: 380 }}
+                >
+                  <option value="hidden">{VISIBILITY_LABELS.hidden}</option>
+                  <option value="internal">{VISIBILITY_LABELS.internal}</option>
+                </select>
+                <div style={{ fontSize: 12.5, color: "var(--ink-4)", marginTop: 4 }}>
+                  The public gallery is opt-in — add it from the projects list once it
+                  has screenshots and reads well.
+                </div>
               </div>
               <div
                 style={{ display: "flex", alignItems: "center", gap: 14 }}

@@ -11,6 +11,12 @@ import {
   SPARK_TERMS,
   SURFACES,
   disciplineFromCourse,
+  PROJECT_STATUSES,
+  PROJECT_STATUS_LABELS,
+  VISIBILITIES,
+  VISIBILITY_LABELS,
+  VISIBILITY_SHORT,
+  type Visibility,
 } from "@/lib/data";
 import ImageSlot from "@/components/ImageSlot";
 import PdBlurbFetch from "@/components/PdBlurbFetch";
@@ -149,6 +155,8 @@ interface EditState {
   /** Owning team of the loaded project — decides read-only vs editable, and is
    *  only ever *changed* by a super admin (see the "Owning team" control). */
   ownerOrg: string;
+  /** Pipeline state: pending | active | complete. Independent of `published`. */
+  status: string;
   title: string;
   blurb: string;
   partner: string;
@@ -170,6 +178,8 @@ interface EditState {
   images: (string | null)[]; // resolved URLs (existing) or bare keys (new uploads)
   featured: boolean;
   published: boolean;
+  /** hidden | internal | public — source of truth; `published` is derived. */
+  visibility: string;
   surfaces: string[]; // which galleries it appears on: "spark" and/or "cds"
   runs: Run[];
 }
@@ -534,8 +544,10 @@ export default function EditProjectPage() {
         images: imgs.slice(0, 4).map((v) => v || null),
         featured: !!project.featured,
         published: project.published !== false,
+        visibility: project.visibility ?? (project.published !== false ? "internal" : "hidden"),
         surfaces: project.surfaces?.length ? project.surfaces : ["spark"],
         ownerOrg: project.ownerOrg ?? "spark",
+        status: project.status ?? "complete",
         runs: project.runs.length
           ? project.runs.map((r) => ({
               term: r.term ?? "",
@@ -736,11 +748,12 @@ export default function EditProjectPage() {
       datasets: form.datasets.filter((d) => d.label.trim()),
       images: form.images.filter(Boolean).map((v) => toStoredKey(v as string)),
       featured: form.featured,
-      published: form.published,
+      visibility: form.visibility,
       surfaces: form.surfaces,
       // Sent ONLY by a super admin. For everyone else the key is absent, so the
       // route's super-only branch never even runs. The API rejects it regardless —
       // this just avoids a pointless 403 on an ordinary save.
+      status: form.status,
       ...(actor?.isSuper ? { ownerOrg: form.ownerOrg } : {}),
       runs,
     };
@@ -806,7 +819,10 @@ export default function EditProjectPage() {
   const canPublish = !!form?.blurb?.trim() && (form?.runs ?? []).some((r) => r.term && r.course.trim());
 
   // Preview link to the public page; drafts get ?preview=1.
-  const previewHref = form?.published ? `/projects/${id}` : `/projects/${id}?preview=1`;
+  // Only a `public` project has a live public URL. Anything else previews through the
+  // admin detail page, which already mirrors the public layout.
+  const previewHref =
+    form?.visibility === "public" ? `/projects/${id}` : `/admin/projects/${id}`;
 
   // The blurb auto-fills from the LATEST run's PD doc (per-semester PD links).
   const latestPd =
@@ -873,8 +889,8 @@ export default function EditProjectPage() {
         >
           Preview ↗
         </a>
-        <span className={`badge ${form.published ? "b-grn" : "b-draft"}`}>
-          {form.published ? "Published" : "Draft"}
+        <span className={`badge ${form.visibility === "public" ? "b-grn" : "b-draft"}`}>
+          {VISIBILITY_SHORT[(form.visibility ?? "hidden") as Visibility]}
         </span>
         {readOnly && (
           <span className="badge" title={`Owned by ${orgLabel(form.ownerOrg)}`}>
@@ -1640,27 +1656,51 @@ export default function EditProjectPage() {
               title="Featured"
               sub="Spotlighted on the gallery."
             />
-            {/* Published (gated) */}
-            <ToggleSwitch
-              id="published"
-              checked={form.published}
-              disabled={!canPublish && !form.published}
-              onChange={(v) => set("published", v)}
-              title="Published"
-              sub={
-                !canPublish && !form.published ? (
+            {/* Visibility — three states, replacing the old published boolean. The
+                gallery is OPT-IN: leaving draft makes a project "ready", and putting it
+                on the gallery is a separate, deliberate step. Both non-draft options
+                are gated on the same completeness checks the boolean used to gate. */}
+            <div style={{ padding: "14px 0" }}>
+              <label
+                htmlFor="visibility"
+                style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", display: "block", marginBottom: 6 }}
+              >
+                Visibility
+              </label>
+              <select
+                id="visibility"
+                className="fld"
+                value={form.visibility}
+                onChange={(e) => set("visibility", e.target.value)}
+                disabled={readOnly}
+                style={{ maxWidth: 380 }}
+              >
+                {VISIBILITIES.map((v) => (
+                  <option
+                    key={v}
+                    value={v}
+                    // Can't leave draft until the record has what a public page needs.
+                    // The current value is never disabled, or it couldn't be re-selected.
+                    disabled={v !== "hidden" && !canPublish && form.visibility !== v}
+                  >
+                    {VISIBILITY_LABELS[v]}
+                  </option>
+                ))}
+              </select>
+              <div style={S.hint}>
+                {!canPublish ? (
                   <>
-                    Not ready to publish — still missing:
+                    Still a draft until it has:
                     <ul style={{ margin: "4px 0 0 14px", padding: 0 }}>
                       {!form.blurb.trim() && <li>Description (blurb)</li>}
                       {!form.runs.some((r) => r.term && r.course.trim()) && <li>At least one course run</li>}
                     </ul>
                   </>
                 ) : (
-                  "Unpublish to hide from the public gallery (draft)."
-                )
-              }
-            />
+                  "\u201cReady\u201d means finished but not on the public gallery \u2014 staff can still preview it here. Only \u201cPublic\u201d is visible to visitors."
+                )}
+              </div>
+            </div>
             {/* Lock blurb (mirrors Description's canonical control). */}
             <ToggleSwitch
               id="lock2"
@@ -1673,6 +1713,31 @@ export default function EditProjectPage() {
                   : "A PD re-sync may overwrite the blurb. Lock it to protect it."
               }
             />
+          </div>
+
+          {/* Pipeline status — the THIRD axis. Deliberately separate from the publish
+              toggle: a project can be complete but unpublished (finished, waiting on
+              a screenshot), or published while still active. Any admin who may edit
+              the project may move it — this is not an authority decision. */}
+          <div style={{ ...S.field, marginTop: 22 }}>
+            <label style={S.lab}>Project status</label>
+            <select
+              className="fld"
+              value={form.status}
+              onChange={(e) => set("status", e.target.value)}
+              disabled={readOnly}
+              style={{ maxWidth: 320 }}
+            >
+              {PROJECT_STATUSES.map((st) => (
+                <option key={st} value={st}>
+                  {PROJECT_STATUS_LABELS[st]}
+                </option>
+              ))}
+            </select>
+            <div style={S.hint}>
+              Where the work is, not who can see it. Publishing is controlled
+              separately below.
+            </div>
           </div>
 
           {/* Owning team — AUTHORITY, distinct from the galleries control below.

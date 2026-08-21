@@ -61,13 +61,26 @@ export interface Project {
   datasets?: ProjectDataset[]; // datasets used, shown next to "View project"
   images?: (string | null)[]; // up to four image URLs; first is the cover
   featured?: boolean; // spotlighted on the gallery
-  published?: boolean; // false = draft, hidden from the public gallery
+  // DERIVED from `visibility` — "not a draft" (internal or public). Kept so the
+  // admin UI's long-standing draft/not-draft concept keeps working off one source of
+  // truth. It is NOT "publicly visible": an `internal` project has published = true
+  // but does not appear on the gallery. For that question, test visibility directly.
+  published?: boolean;
+  // VISIBILITY — "hidden" | "internal" | "public"; see VISIBILITIES. The gallery is
+  // opt-in, so only "public" reaches anonymous visitors.
+  visibility?: string;
   surfaces?: string[]; // which galleries it appears on: "spark" and/or "cds" (default ["spark"])
   // VISIBILITY (surfaces) vs AUTHORITY (ownerOrg) — deliberately separate axes.
   // A project can be tagged for both galleries while exactly one team may edit it.
   // Never derive one from the other: every cds-tagged project is also spark-tagged,
   // so surfaces cannot express an edit boundary. See lib/authz.ts.
   ownerOrg?: string; // owning team: "spark" | "cds" (default "spark")
+  // PIPELINE state — the third axis, independent of `published` (visibility) and
+  // `ownerOrg` (authority). "pending" | "active" | "complete"; see PROJECT_STATUSES.
+  // A project can be complete but unpublished (finished, missing a screenshot), or
+  // published while active. Don't infer it from the latest run's term either: a past
+  // term means the semester ended, not that the work was finished.
+  status?: string;
   custom?: boolean; // admin-added flag
   // DERIVED, ADMIN-ONLY: number of student contributors on this project. Set only
   // by getProjectsForList() (the admin list projection); undefined on public

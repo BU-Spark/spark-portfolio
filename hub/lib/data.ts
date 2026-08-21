@@ -195,6 +195,52 @@ export const SPARK_TERMS = [
   "Spring 2024",
 ];
 
+// Where a project is in the delivery pipeline. A THIRD axis, independent of both
+// `published` (whether the public sees it) and `owner_org` (which team may edit it)
+// — a project can be complete but unpublished (finished, awaiting a screenshot), or
+// published while still active. Never derive one axis from another.
+//
+// Mirrors the projects_status_chk CHECK constraint in
+// db/migrations/002_project_status.sql. Keep the two in step: a value added here
+// and not there is rejected by the database at write time.
+export const PROJECT_STATUSES = ["pending", "active", "complete"] as const;
+
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+/** Admin-facing labels + the one-line meaning, used by the form selects. */
+export const PROJECT_STATUS_LABELS: Record<ProjectStatus, string> = {
+  pending: "Pending — scoped, not started",
+  active: "Active — in progress",
+  complete: "Complete — work finished",
+};
+
+// Who can see a project. Widened from the old `published` boolean so the gallery can
+// be OPT-IN: "ready" and "live" are different states, and a boolean cannot hold both.
+//
+//   hidden    draft — not finished; only the admin area shows it
+//   internal  ready, not opted in. Staff preview it at /admin/projects/<id>, which
+//             already mirrors the public layout.
+//   public    opted in — live on the gallery
+//
+// Mirrors projects_visibility_chk in db/migrations/003_visibility.sql. Order matters
+// here: it is least → most visible, and the admin select renders in this order.
+export const VISIBILITIES = ["hidden", "internal", "public"] as const;
+
+export type Visibility = (typeof VISIBILITIES)[number];
+
+export const VISIBILITY_LABELS: Record<Visibility, string> = {
+  hidden: "Draft — not finished",
+  internal: "Ready — staff only, not on the gallery",
+  public: "Public — live on the gallery",
+};
+
+/** Short label for list badges. */
+export const VISIBILITY_SHORT: Record<Visibility, string> = {
+  hidden: "draft",
+  internal: "ready",
+  public: "public",
+};
+
 export const SPARK_PROJECTS: SeedProject[] = [
   {
     id: "boston-311-equity",

@@ -1,5 +1,5 @@
 -- Canonical schema for the BU Spark! Project Gallery DB.
--- GENERATED from the live database by scripts/generate-schema-sql.ts — do not hand-edit.
+-- GENERATED from the live database by db/generate-schema-sql.ts — do not hand-edit.
 -- Regenerate after any migration. This is the source-of-truth DDL + the Database++ seed contract.
 
 CREATE TABLE IF NOT EXISTS contributors (
@@ -15,6 +15,14 @@ CREATE TABLE IF NOT EXISTS contributors (
 ALTER TABLE contributors ADD CONSTRAINT contributors_pkey PRIMARY KEY (id);
 ALTER TABLE contributors ADD CONSTRAINT contributors_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
 CREATE INDEX idx_contributors_project ON public.contributors USING btree (project_id);
+
+CREATE TABLE IF NOT EXISTS digest_snapshots (
+  id bigserial,
+  org text NOT NULL,
+  counts jsonb NOT NULL,
+  sent_at timestamp with time zone NOT NULL DEFAULT now()
+);
+ALTER TABLE digest_snapshots ADD CONSTRAINT digest_snapshots_pkey PRIMARY KEY (id);
 
 CREATE TABLE IF NOT EXISTS import_inbox (
   id bigserial,
@@ -120,10 +128,14 @@ CREATE TABLE IF NOT EXISTS projects (
   code_private boolean NOT NULL DEFAULT false,
   client_desc text,
   surfaces text[] NOT NULL DEFAULT '{spark}'::text[],
-  owner_org text NOT NULL DEFAULT 'spark'::text
+  owner_org text NOT NULL DEFAULT 'spark'::text,
+  status text NOT NULL DEFAULT 'pending'::text,
+  visibility text NOT NULL DEFAULT 'hidden'::text
 );
 ALTER TABLE projects ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
 ALTER TABLE projects ADD CONSTRAINT projects_owner_org_chk CHECK ((owner_org = ANY (ARRAY['spark'::text, 'cds'::text])));
+ALTER TABLE projects ADD CONSTRAINT projects_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'complete'::text])));
+ALTER TABLE projects ADD CONSTRAINT projects_visibility_chk CHECK ((visibility = ANY (ARRAY['hidden'::text, 'internal'::text, 'public'::text])));
 CREATE INDEX idx_projects_listing ON public.projects USING btree (published, featured, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (

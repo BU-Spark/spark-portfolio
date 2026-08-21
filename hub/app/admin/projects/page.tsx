@@ -27,6 +27,7 @@ import ConfirmModal from "@/components/admin/ConfirmModal";
 import MergeProjectsModal from "@/components/admin/MergeProjectsModal";
 import FilterBar from "@/components/admin/FilterBar";
 import { useHotkey } from "@/components/admin/useHotkey";
+import { PROJECT_STATUSES, PROJECT_STATUS_LABELS, type ProjectStatus, VISIBILITIES, VISIBILITY_LABELS } from "@/lib/data";
 
 // Short uppercase code shown on the discipline cover tile (e.g. DATAVIZ, ML).
 function disciplineAbbr(d: string): string {
@@ -58,6 +59,8 @@ interface StoredFilters {
   tpmFilter: string;
   termFilter: string;
   disciplineFilter: string;
+  statusFilter: string;
+  visFilter: string;
   gapIncludes: string[];
   gapExcludes: string[];
   gapMode: "all" | "any";
@@ -98,6 +101,8 @@ export default function ManageProjectsPage() {
   const [tpmFilter, setTpmFilter] = useState("");
   const [termFilter, setTermFilter] = useState("");
   const [disciplineFilter, setDisciplineFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [visFilter, setVisFilter] = useState("");
   const [gapIncludes, setGapIncludes] = useState<Set<string>>(new Set());
   const [gapExcludes, setGapExcludes] = useState<Set<string>>(new Set());
   // How multiple "missing X" (include) chips combine: "all" = AND (missing every
@@ -181,6 +186,12 @@ export default function ManageProjectsPage() {
           if (typeof s.tpmFilter === "string") setTpmFilter(s.tpmFilter);
           if (typeof s.termFilter === "string") setTermFilter(s.termFilter);
           if (typeof s.disciplineFilter === "string") setDisciplineFilter(s.disciplineFilter);
+          // Validated against the vocabulary: a stale value would filter every row
+          // out and render no chip to clear it with.
+          if (s.statusFilter === "" || (PROJECT_STATUSES as readonly string[]).includes(s.statusFilter ?? ""))
+            setStatusFilter(s.statusFilter ?? "");
+          if (s.visFilter === "" || (VISIBILITIES as readonly string[]).includes(s.visFilter ?? ""))
+            setVisFilter(s.visFilter ?? "");
           // Gap chips are validated against the current vocabulary — a renamed field
           // would otherwise restore a chip that matches nothing and can't be cleared
           // from the UI, since no chip renders for an unknown value.
@@ -219,6 +230,8 @@ export default function ManageProjectsPage() {
       tpmFilter,
       termFilter,
       disciplineFilter,
+      statusFilter,
+      visFilter,
       gapIncludes: [...gapIncludes],
       gapExcludes: [...gapExcludes],
       gapMode,
@@ -237,6 +250,8 @@ export default function ManageProjectsPage() {
     tpmFilter,
     termFilter,
     disciplineFilter,
+    statusFilter,
+    visFilter,
     gapIncludes,
     gapExcludes,
     gapMode,
@@ -291,13 +306,21 @@ export default function ManageProjectsPage() {
   const lockedTitle = (p: Project) =>
     `Owned by ${orgLabel(p.ownerOrg ?? "spark")} — ask one of their admins to change it.`;
 
-  const togglePublish = async (p: Project) => {
-    const nextPublished = p.published === false;
+  // Gallery opt-in/out. Under the opt-in model this is the action that actually
+  // matters day to day: Ziba/Lydia put a project on the gallery just before a pitch.
+  //
+  // Removing sends it to 'internal' (ready), NOT 'hidden' (draft) — pulling something
+  // off the gallery is not the same as declaring it unfinished, and silently
+  // demoting to draft would lose that distinction. Send it back to draft from the
+  // edit page, which has the full three-way control.
+  const toggleGallery = async (p: Project) => {
+    const isPublic = (p.visibility ?? "hidden") === "public";
+    const next = isPublic ? "internal" : "public";
     setBusy(p.id);
     const res = await fetch(`/api/projects/${p.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ published: nextPublished }),
+      body: JSON.stringify({ visibility: next }),
     }).catch(() => null);
     if (!res || !res.ok) {
       const msg = res && res.status === 422
@@ -307,16 +330,17 @@ export default function ManageProjectsPage() {
       setBusy(null);
       return;
     }
-    notify("ok", nextPublished ? `"${p.title}" is now visible.` : `"${p.title}" hidden.`);
+    notify("ok", isPublic ? `"${p.title}" removed from the gallery.` : `"${p.title}" is now live.`);
     await refresh();
     setBusy(null);
   };
+
 
   // "Show" (publish) respects the publish gate; route to togglePublish which
   // surfaces a 422. "Hide" on a published project asks for confirmation first.
   const onToggleClick = (p: Project) => {
     if (p.published === false) {
-      togglePublish(p);
+      toggleGallery(p);
     } else {
       setHideTarget(p);
     }
@@ -450,7 +474,7 @@ export default function ManageProjectsPage() {
     const p = hideTarget;
     setHideTarget(null);
     if (!p) return;
-    await togglePublish(p);
+    await toggleGallery(p);
   };
 
   // Close the overflow menu on any outside click / Escape.
@@ -507,6 +531,8 @@ export default function ManageProjectsPage() {
     setTpmFilter("");
     setTermFilter("");
     setDisciplineFilter("");
+    setStatusFilter("");
+    setVisFilter("");
     setGapIncludes(new Set());
     setGapExcludes(new Set());
     setGapMode("all");
@@ -525,6 +551,8 @@ export default function ManageProjectsPage() {
     (tpmFilter ? 1 : 0) +
     (termFilter ? 1 : 0) +
     (disciplineFilter ? 1 : 0) +
+    (statusFilter ? 1 : 0) +
+    (visFilter ? 1 : 0) +
     gapIncludes.size +
     gapExcludes.size;
 
@@ -539,6 +567,9 @@ export default function ManageProjectsPage() {
       if (tpmFilter && canonical(p.tpm) !== tpmFilter) return false;
       if (termFilter && !projectTerms(p).includes(termFilter)) return false;
       if (disciplineFilter && !p.runs.some((r) => r.discipline === disciplineFilter)) return false;
+      // Default "complete" mirrors rowToProject, so pre-migration rows read consistently.
+      if (statusFilter && (p.status ?? "complete") !== statusFilter) return false;
+      if (visFilter && (p.visibility ?? "hidden") !== visFilter) return false;
       const missing = missingInfo(p);
       if (gapIncludes.size) {
         const inc = [...gapIncludes];
@@ -762,6 +793,30 @@ export default function ManageProjectsPage() {
           <div className="filterpanel">
             {/* Dropdown filters — labeled grid */}
             <div className="filtergrid">
+              <div className="filteritem">
+                <label className="lab">Visibility</label>
+                <select className="fld" value={visFilter} onChange={(e) => setVisFilter(e.target.value)}>
+                  <option value="">Any visibility</option>
+                  {VISIBILITIES.map((v) => (
+                    <option key={v} value={v}>{VISIBILITY_LABELS[v]}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filteritem">
+                <label className="lab">Status</label>
+                <select
+                  className="fld"
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                  <option value="">Any status</option>
+                  {PROJECT_STATUSES.map((st) => (
+                    <option key={st} value={st}>
+                      {PROJECT_STATUS_LABELS[st]}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="filteritem">
                 <label className="lab">Term</label>
                 <select className="fld" value={termFilter} onChange={(e) => setTermFilter(e.target.value)}>
@@ -1079,7 +1134,7 @@ export default function ManageProjectsPage() {
                     )}
                     <button
                       className="hidebtn"
-                      onClick={() => togglePublish(p)}
+                      onClick={() => toggleGallery(p)}
                       disabled={busy === p.id || !mine(p)}
                       title={mine(p) ? undefined : lockedTitle(p)}
                       style={{
@@ -1327,6 +1382,22 @@ export default function ManageProjectsPage() {
                       <span className="rec-ttl">{p.title}</span>
                       {p.featured && (
                         <span className="badge b-teal" title="Featured on the gallery">★ featured</span>
+                      )}
+                      {/* Pipeline status. Only the in-flight states are badged: every
+                          existing project is 'complete', so badging that would put an
+                          identical pill on all 170 rows and carry no information. */}
+                      {(p.status ?? "complete") !== "complete" && (
+                        <span
+                          className="badge"
+                          title={PROJECT_STATUS_LABELS[(p.status ?? "complete") as ProjectStatus]}
+                          style={
+                            p.status === "active"
+                              ? { color: "#0369a1", background: "#0369a114", border: "1px solid #0369a144" }
+                              : { color: "#92400e", background: "#92400e14", border: "1px solid #92400e44" }
+                          }
+                        >
+                          {p.status}
+                        </span>
                       )}
                       {p.pdUrl && !p.blurb?.trim() && (
                         <span
