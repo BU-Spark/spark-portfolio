@@ -56,27 +56,32 @@ export const SURFACES: { key: string; label: string; hint: string }[] = [
 ];
 export const SURFACE_KEYS = SURFACES.map((s) => s.key);
 
-// Subject-matter topics (the Topic facet vocabulary). Admin-editable; this is a
-// detailed starting set.
+// Subject-matter topics (the Topic facet vocabulary). Admin-editable: a `settings`
+// row with key 'gallery' overrides this, and only the baseline lives here.
+//
+// Replaced the original 18-term set with these 11 broader groupings. The old set had
+// overlapping pairs an editor had to choose between arbitrarily — Housing vs Community
+// Development, Public Safety vs Criminal Justice, Environment & Climate vs
+// Sustainability, Government & Policy vs Civic Engagement — and a facet whose terms
+// aren't mutually exclusive splits the same project across two filters.
+//
+// Safe to change outright rather than remap: **zero of the 170 projects had any topic
+// assigned** when this was swapped (verified against prod), and the `settings` table
+// was empty, so nothing referenced the old terms. Once projects carry topics, replacing
+// a term means migrating `projects.topics` too — the column stores the display string,
+// not an id, so a rename orphans every row that used it.
 export const SPARK_TOPICS = [
-  "Criminal Justice",
-  "Healthcare",
-  "Mental Health",
-  "Education",
-  "Housing",
-  "Environment & Climate",
-  "Public Safety",
-  "Transportation",
-  "Immigration",
-  "Economic Development",
-  "Civic Engagement",
-  "Government & Policy",
-  "Arts & Culture",
-  "Food Security",
-  "Accessibility",
-  "Community Development",
-  "Media & Journalism",
-  "Sustainability",
+  "Housing & Urban Development",
+  "Government, Politics & Public Policy",
+  "Criminal Justice & Public Safety",
+  "Education & Learning",
+  "Immigration, Community & Social Services",
+  "Business, Economy & Work",
+  "Health, Medicine & Wellbeing",
+  "Environment & Sustainability",
+  "Law & Civil Rights",
+  "Media, Technology & Communication",
+  "Arts, Culture & Humanities",
 ];
 
 // Baseline gallery config. The admin settings panel can override the
