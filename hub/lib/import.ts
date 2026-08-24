@@ -41,6 +41,18 @@ import { semesterRank } from "@/lib/semester";
 import { parseTechStack } from "@/lib/tech";
 import type { Run } from "@/lib/types";
 
+/** One field the sync would change, for the dry-run preview. */
+export interface ImportChange {
+  /** Project id the change lands on. */
+  project: string;
+  /** Tracker row that produced it, since the two names often differ. */
+  tracker: string;
+  /** `blurb`, `partner`, or `runs[Spring 2026].pm` for a per-run role. */
+  field: string;
+  from: string;
+  to: string;
+}
+
 export interface ImportResult {
   ok: true;
   received: number;
@@ -52,6 +64,15 @@ export interface ImportResult {
   inboxed: number;
   noBlurb: string[];
   fuzzyMatched: string[];
+  /** True when nothing was written. */
+  dry?: boolean;
+  /**
+   * Populated ONLY on a dry run. Every field the sync would overwrite, with its
+   * current value — the point being that resolveRole below clobbers staffing
+   * unconditionally, so a hand-correction is invisible until it is already gone.
+   * Omitted on a real run rather than computed and discarded.
+   */
+  changes?: ImportChange[];
 }
 
 /**
@@ -62,7 +83,21 @@ export interface ImportResult {
  * read from the request body: a shared secret that can nominate its own scope is
  * the original bypass one layer down.
  */
-export async function runImport(rows: IncomingRow[], org: string): Promise<ImportResult> {
+export async function runImport(
+  rows: IncomingRow[],
+  org: string,
+  /**
+   * Render what the sync would do and write NOTHING — no project update, no inbox
+   * row, no person_role, no cache revalidation. Mirrors `?dry=1` on the digest.
+   *
+   * This exists because the write path is not idempotent from a human's point of
+   * view: `resolveRole` overwrites staffing whenever the tracker supplies a value,
+   * so correcting a PM by hand and then re-syncing silently reverts it. A preview
+   * is the only way to see that before it happens.
+   */
+  dry = false
+): Promise<ImportResult> {
+  const changes: ImportChange[] = [];
   const [all, blurbTermById, aliasMap, peopleAliasMap] = await Promise.all([
     getAllProjects(),
     getBlurbTermMap(),
@@ -117,7 +152,9 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
           r.techText && r.techText.trim() ? parseTechStack(r.techText) : null;
         const pd = (r.pdUrl || "").trim();
         const repo = (r.github || "").trim();
-        await upsertInboxRow(
+        // A dry run still COUNTS what it would inbox (inboxed++ below) but writes no
+        // row — otherwise previewing a sync would leave triage work behind.
+        if (!dry) await upsertInboxRow(
           {
             rawName: name,
             partner: cleanClientName(r.client || "") || splitClientProject(name).client,
@@ -232,7 +269,7 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
         (roleUpdates[field] as string) = personName;
         // The dated timeline row is independent of where the run lives. People are
         // shared across orgs by design, so this is not org-scoped.
-        await upsertPersonRole(personName, match.id, r.semester || "", roleLabel, email);
+        if (!dry) await upsertPersonRole(personName, match.id, r.semester || "", roleLabel, email);
       }
     };
     await resolveRole("sparkProgramLead", "Program Lead", r.programLead, true);
@@ -252,12 +289,45 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
     }
 
     if (Object.keys(patch).length) {
-      await updateProject(match.id, patch);
+      if (dry) {
+        // Record the delta instead of writing it. `runs` is skipped as a whole and
+        // reported per changed role field instead — dumping the entire array would
+        // bury the one field that actually differs.
+        for (const [k, v] of Object.entries(patch)) {
+          if (k === "runs") continue;
+          changes.push({
+            project: match.id,
+            tracker: name,
+            field: k,
+            from: String((match as unknown as Record<string, unknown>)[k] ?? ""),
+            to: String(v ?? ""),
+          });
+        }
+        if (runIdx >= 0) {
+          const before = rawRuns[runIdx] as unknown as Record<string, unknown>;
+          for (const [k, v] of Object.entries(roleUpdates)) {
+            const from = String(before[k] ?? "");
+            const to = String(v ?? "");
+            if (from === to) continue;
+            changes.push({
+              project: match.id,
+              tracker: name,
+              field: `runs[${rawRuns[runIdx].term}].${k}`,
+              from,
+              to,
+            });
+          }
+        }
+      } else {
+        await updateProject(match.id, patch);
+      }
       updated.push(name);
     }
   }
 
-  if (updated.length) revalidateTag("projects"); // refresh cached public pages
+  // No cache bust on a dry run — nothing changed, and busting would make a preview
+  // cost every visitor a cold render.
+  if (updated.length && !dry) revalidateTag("projects"); // refresh cached public pages
 
   return {
     ok: true,
@@ -269,5 +339,6 @@ export async function runImport(rows: IncomingRow[], org: string): Promise<Impor
     inboxed,
     noBlurb,
     fuzzyMatched,
+    ...(dry ? { dry: true as const, changes } : {}),
   };
 }

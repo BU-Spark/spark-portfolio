@@ -253,22 +253,37 @@ export const PROJECT_STATUS_SHORT: Record<ProjectStatus, string> = {
 //
 // Mirrors projects_visibility_chk in db/migrations/003_visibility.sql. Order matters
 // here: it is least → most visible, and the admin select renders in this order.
-export const VISIBILITIES = ["hidden", "internal", "public"] as const;
+export const VISIBILITIES = ["hidden", "restricted", "internal", "public"] as const;
 
 export type Visibility = (typeof VISIBILITIES)[number];
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
   hidden: "Draft — not finished",
-  internal: "Ready — staff only, not on the gallery",
+  restricted: "Restricted — finished, deliberately closed to BU users",
+  internal: "BU-visible — any signed-in @bu.edu user can see it",
   public: "Public — live on the gallery",
 };
 
 /** Short label for list badges. */
 export const VISIBILITY_SHORT: Record<Visibility, string> = {
   hidden: "draft",
-  internal: "ready",
+  restricted: "restricted",
+  internal: "bu-only",
   public: "public",
 };
+
+/**
+ * Can a signed-in @bu.edu user (who is NOT an admin) see this project?
+ *
+ * The one place that question is answered, so the BU tier can never be re-derived
+ * slightly differently in a second file. `restricted` and `hidden` are BOTH closed
+ * to BU users — they differ in what they say about the work, not in who may see it.
+ *
+ * NOTE for the reader who is about to use this in a data-layer read: the public
+ * readers in lib/db.ts are `unstable_cache`d under fixed keys and MUST stay
+ * session-independent. A viewer-aware read belongs in its own uncached function.
+ */
+export const BU_VISIBLE: readonly Visibility[] = ["internal", "public"];
 
 export const SPARK_PROJECTS: SeedProject[] = [
   {

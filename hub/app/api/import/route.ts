@@ -58,5 +58,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "No rows provided." }, { status: 400 });
   }
 
-  return Response.json(await runImport(rows, org));
+  // ?dry=1 renders what the sync would change and writes nothing — no project
+  // update, no inbox row, no person_role, no cache bust. Mirrors the digest's flag.
+  //
+  // This is not a nicety. resolveRole overwrites staffing whenever the tracker has a
+  // value, so a hand-corrected PM is reverted by the next sync with no warning. The
+  // preview is the only way to see that coming, and the Apps Script never sets it, so
+  // the scheduled feed is unaffected.
+  const dry = new URL(req.url).searchParams.get("dry") === "1";
+  return Response.json(await runImport(rows, org, dry));
 }

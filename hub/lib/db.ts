@@ -631,18 +631,26 @@ export async function updateProject(id: string, patch: ProjectPatch): Promise<vo
     add("visibility", patch.visibility);
     add("published", patch.visibility !== "hidden");
   } else if (patch.published !== undefined) {
-    // Legacy boolean callers. Two rules, both load-bearing:
+    // Legacy boolean callers. Three rules, all load-bearing:
     //
-    //  published=true  → never promotes to 'public'. Un-hiding makes a project READY;
-    //    opting it in to the gallery stays a separate, deliberate act. But it must
-    //    also not DEMOTE one that is already public, which a plain assignment would:
-    //    hide-then-show on a live project would quietly pull it off the gallery. The
-    //    CASE preserves 'public' and needs no extra read to do it.
+    //  published=true  → never promotes. Un-hiding makes a project finished-but-closed,
+    //    not visible to anyone new. It must also not DEMOTE something already more
+    //    visible, which a plain assignment would: hide-then-show on a live project
+    //    would quietly pull it off the gallery. The CASE preserves whatever visibility
+    //    the row already has, and needs no extra read to do it.
+    //
+    //  the landing state for a previously-hidden row is 'restricted', NOT 'internal'.
+    //    Since 005, 'internal' means "the whole BU community can see this". A boolean
+    //    with no notion of tiers must never be able to make that claim — otherwise any
+    //    legacy `published: true` write silently publishes a draft to the university.
+    //    'restricted' is the honest landing: no longer a draft, nobody new can see it.
     //
     //  published=false → 'hidden' unconditionally. Hiding is unambiguous.
     add("published", patch.published);
     if (patch.published) {
-      sets.push(`visibility = CASE WHEN visibility = 'public' THEN 'public' ELSE 'internal' END`);
+      sets.push(
+        `visibility = CASE WHEN visibility IN ('public', 'internal') THEN visibility ELSE 'restricted' END`
+      );
     } else {
       add("visibility", "hidden");
     }

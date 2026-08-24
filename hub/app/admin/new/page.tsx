@@ -617,7 +617,11 @@ export default function AddProjectPage() {
                   onChange={(e) => set("visibility")(e.target.value)}
                   style={{ maxWidth: 380 }}
                 >
+                  {/* 'public' is deliberately absent — the gallery is opt-in from the
+                      projects list. 'internal' is offered but means BU-community
+                      visible, so 'restricted' is the safe finished-but-closed choice. */}
                   <option value="hidden">{VISIBILITY_LABELS.hidden}</option>
+                  <option value="restricted">{VISIBILITY_LABELS.restricted}</option>
                   <option value="internal">{VISIBILITY_LABELS.internal}</option>
                 </select>
                 <div style={{ fontSize: 12.5, color: "var(--ink-4)", marginTop: 4 }}>
