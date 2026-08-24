@@ -6,18 +6,27 @@ Backend is **live**: Railway Postgres (`pg`) + Railway S3 + Auth.js (Google OAut
 `hub/`. Design is inline-style; fonts are IBM Plex Sans (body) and Space Grotesk
 (display/bold).
 
-## Where this actually runs (measured 2026-08-21)
-Two deployment targets exist and **they disagree**. Check before assuming.
+## Where this actually runs (measured 2026-08-24)
+**The production domain is `atlas.buspark.io`.** Two deployment targets exist and they
+disagree — check before assuming, and note the Vercel one is expected to be torn down.
 
 | | State |
 |---|---|
-| `sparkshowcase.vercel.app` | **LIVE**, serving all 140 projects publicly, on **old code** (`/api/digest/weekly` and `/api/pd-complete` both 404) |
-| `hub.buspark.io` / `int.hub.buspark.io` | **no DNS record** (NOERROR, zero answers) — never successfully deployed |
+| `atlas.buspark.io` (+ `int.atlas.buspark.io`) | **the real production host.** Cloudflare Worker, live, but on **stale code**: `/api/import` answers 401, while `/api/digest/weekly` and `/api/pd-complete` 404 — so the build predates `95a0353` |
+| `sparkshowcase.vercel.app` | interim host, **current code**, kept alive only until the Worker is redeployed |
+| `hub.buspark.io` / `int.hub.buspark.io` | **never existed.** No DNS record on Cloudflare's own nameservers |
 
 `hub/` is built for Cloudflare Workers: `wrangler.jsonc` (prod) / `wrangler.int.jsonc`
-(int), `@opennextjs/cloudflare`, Hyperdrive, and `"custom_domain": true` — which
-creates the DNS record *on deploy*, so a missing record means `wrangler deploy` has
-not run. There is no `hub/.vercel`; `npm run deploy` is `wrangler deploy`.
+(int), `@opennextjs/cloudflare`, Hyperdrive. There is no committed `.vercel`;
+`npm run deploy` is `wrangler deploy`.
+
+**A wrong conclusion recorded here on 2026-08-21, so nobody repeats it:** the config
+said `hub.buspark.io`, that name had no DNS record, and `custom_domain: true` creates
+the record on deploy — from which I concluded the Worker had never been deployed. It
+had. It was deployed to `atlas.buspark.io`, and the config in git was simply stale.
+The lesson: `custom_domain` proves a *route* was never deployed, not that the *Worker*
+wasn't. Check the account's actual routes before concluding anything about a missing
+hostname.
 
 **Consequence, and the trap:** the DB can be in the intended state while users see
 something else. `visibility` only takes effect once code that filters on it is

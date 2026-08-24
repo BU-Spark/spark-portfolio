@@ -24,7 +24,7 @@
   ],
   "routes": [
     {
-      "pattern": "hub.buspark.io",
+      "pattern": "atlas.buspark.io",
       "custom_domain": true
     }
   ],
@@ -38,7 +38,7 @@
   // `trustHost: true`, so Auth.js derives the URL from the request and doesn't need
   // it; it's here so deploying doesn't quietly delete a variable someone set by hand.
   "vars": {
-    "NEXTAUTH_URL": "https://hub.buspark.io",
+    "NEXTAUTH_URL": "https://atlas.buspark.io",
     // Must be a Resend-verified domain. Unset, lib/email.ts falls back to Resend's
     // sandbox sender, which only delivers to the Resend account owner — so every PM
     // invite fails regardless of how the domain's DNS is configured.

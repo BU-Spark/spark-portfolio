@@ -16,7 +16,7 @@
   ],
   "routes": [
     {
-      "pattern": "int.hub.buspark.io",
+      "pattern": "int.atlas.buspark.io",
       "custom_domain": true
     }
   ],
@@ -24,7 +24,7 @@
   // Same sender as prod: the point of testing here is to prove the real sender
   // actually delivers, which a different address wouldn't establish.
   "vars": {
-    "NEXTAUTH_URL": "https://int.hub.buspark.io",
+    "NEXTAUTH_URL": "https://int.atlas.buspark.io",
     "EMAIL_FROM": "no-reply@buspark.io",
     "EMAIL_REPLY_TO": "buspark@bu.edu"
   },
