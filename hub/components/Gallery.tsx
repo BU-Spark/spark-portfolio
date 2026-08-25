@@ -167,6 +167,64 @@ function FacetGroup({
   );
 }
 
+/**
+ * Project-state pill, for signed-in BU viewers.
+ *
+ * Two INDEPENDENT axes, deliberately not merged into one "state" — see the three-axes
+ * rule in hub/CLAUDE.md. A project can legitimately show both pills:
+ *
+ *   yellow  status === "in_review"      — a completion was submitted and bounced
+ *   pink    visibility === "restricted" — finished, deliberately closed
+ *   grey    visibility === "internal"   — visible to BU, not opted in to the gallery
+ *   none    public and not in review    — nothing to say
+ *
+ * `restricted` and `hidden` never reach a viewer's payload, so the pink pill only
+ * ever renders in an admin context. It is here so the vocabulary is defined in one
+ * place rather than re-derived on the admin side.
+ */
+function StatePills({ project }: { project: Project }) {
+  const pills: { label: string; color: string }[] = [];
+  if (project.visibility === "restricted") pills.push({ label: "restricted", color: "#be185d" });
+  else if (project.visibility === "internal") pills.push({ label: "not public", color: "#6b7280" });
+  if (project.status === "in_review") pills.push({ label: "in review", color: "#b45309" });
+  if (!pills.length) return null;
+  return (
+    <>
+      {pills.map((p) => (
+        <span
+          key={p.label}
+          title={
+            p.label === "in review"
+              ? "A completion form was submitted and the automated checks flagged something."
+              : p.label === "restricted"
+                ? "Finished, but deliberately not shared beyond the Spark! team."
+                : "Visible to signed-in BU accounts. Not on the public gallery."
+          }
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            flexShrink: 0,
+            fontFamily: "var(--mono)",
+            fontSize: 10,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            fontWeight: 600,
+            color: p.color,
+            background: `${p.color}14`,
+            border: `1px solid ${p.color}44`,
+            borderRadius: 999,
+            padding: "1px 7px",
+            lineHeight: 1.4,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {p.label}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function FeaturedBadge({ style }: { style?: React.CSSProperties }) {
   return (
     <span
@@ -872,6 +930,7 @@ export default function Gallery({
                         {p.featured && (
                           <FeaturedBadge style={{ flexShrink: 0 }} />
                         )}
+                        <StatePills project={p} />
                       </div>
                       <div style={{ marginTop: 5 }}>
                         <TechTags tech={p.tech} max={3} />
@@ -1017,6 +1076,7 @@ export default function Gallery({
                       >
                         {projectDisciplines(p).join(" / ")} · {latestTerm(p)}
                       </span>
+                      <StatePills project={p} />
                     </div>
                     <h3
                       style={{

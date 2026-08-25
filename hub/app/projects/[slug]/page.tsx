@@ -2,7 +2,19 @@
 // admin-added projects alike), each with its own metadata for SEO/sharing.
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getProject, getProjectRedirect } from "@/lib/db";
+import { getProject, getProjectForViewer, getProjectRedirect } from "@/lib/db";
+import { auth } from "@/auth";
+
+/**
+ * A signed-in @bu.edu viewer may read `internal` projects as well as `public` ones.
+ * Anonymous visitors keep the unstable_cache'd reader; signed-in ones take the
+ * uncached viewer-scoped one, because the cache key is shared and would otherwise
+ * hand an internal project to the next anonymous request.
+ */
+async function readProject(slug: string) {
+  const session = await auth();
+  return session?.user?.email ? getProjectForViewer(slug) : getProject(slug);
+}
 import { projectDisciplines } from "@/lib/project";
 import { cleanBlurb } from "@/lib/gdocs";
 import ProjectView from "@/components/ProjectView";
@@ -29,7 +41,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const p = await getProject(slug);
+  const p = await readProject(slug);
   if (!p) return { title: "Project — BU Spark! Project Gallery" };
   const cover = p.images?.[0];
   const description = metaDescription(p.blurb);
@@ -51,7 +63,7 @@ export default async function ProjectPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const project = await getProject(slug);
+  const project = await readProject(slug);
   if (!project) {
     // Slug may belong to a record that was merged away — 308 to the survivor.
     const to = await getProjectRedirect(slug);

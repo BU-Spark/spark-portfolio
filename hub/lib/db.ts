@@ -22,6 +22,7 @@ import {
   SURFACE_KEYS,
   PROJECT_STATUSES,
   VISIBILITIES,
+  BU_VISIBLE,
 } from "./data";
 import { deleteObject } from "./s3";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
@@ -292,6 +293,40 @@ export const getProject = unstable_cache(
   ["public-project"],
   { tags: ["projects"], revalidate: 300 }
 );
+
+// ─── BU TIER reads ────────────────────────────────────────────────────────────
+// For a signed-in @bu.edu viewer who is NOT an admin. Same field projection as the
+// anonymous reads (rowToProject's default already strips students, teamId, staff
+// roles, contacts, pdUrl and driveUrl) — a BU viewer sees MORE ROWS, never more
+// columns. That is what makes the tier cheap: no second projection to keep in step,
+// so a field can't leak by being added to one and forgotten in the other.
+//
+// DELIBERATELY NOT unstable_cache'd, and this is the whole point. getProjects above
+// is cached under the fixed key ["public-projects-list"]; if the tier were folded
+// into it — even behind a parameter — the first signed-in visitor's payload would be
+// served to every anonymous one after, publishing all 140 internal projects. Two
+// functions, one cached and session-independent, one uncached and viewer-scoped.
+//
+// The cost is a DB round trip per signed-in page view. Acceptable: the pages that
+// call these are already `dynamic = "force-dynamic"`, the dataset is 170 rows, and
+// correctness here is not negotiable. If it ever matters, cache per-tier under a
+// key that NAMES the tier — never per-user.
+export async function getProjectsForViewer(): Promise<Project[]> {
+  const rows = await query<ProjectRow>(
+    `SELECT ${COLS} FROM projects WHERE visibility = ANY($1)
+      ORDER BY featured DESC, custom DESC, created_at DESC, title ASC`,
+    [BU_VISIBLE as unknown as string[]]
+  );
+  return rows.map((r) => rowToProject(r));
+}
+
+export async function getProjectForViewer(id: string): Promise<Project | null> {
+  const rows = await query<ProjectRow>(
+    `SELECT ${COLS} FROM projects WHERE id = $1 AND visibility = ANY($2)`,
+    [id, BU_VISIBLE as unknown as string[]]
+  );
+  return rows[0] ? rowToProject(rows[0]) : null;
+}
 
 // ADMIN reads — all projects (incl. drafts). List view strips private fields;
 // getProjectAdmin returns the full record (students/teamId) for the edit form.

@@ -4,14 +4,26 @@ import type { NextAuthConfig } from "next-auth";
 
 export const authConfig = {
   trustHost: true,
-  pages: { signIn: "/admin/login" },
+  // One sign-in surface for everyone. A BU viewer bounced from a protected page and
+  // an admin arriving deliberately land in the same place; the callbackUrl decides
+  // where they end up.
+  pages: { signIn: "/login" },
   providers: [],
   callbacks: {
     authorized({ auth, request }) {
       const { pathname } = request.nextUrl;
-      // The login page itself is always reachable.
-      if (pathname === "/admin/login") return true;
-      // Everything else under /admin requires a session.
+      // Both login surfaces stay reachable without a session, or the redirect loops.
+      if (pathname === "/login" || pathname === "/admin/login") return true;
+      // Everything under /admin requires a session — and NOTHING MORE. This check
+      // cannot tell an admin from a signed-in student: it runs at the edge, where
+      // auth.config.ts must not import lib/db.ts (server-only + pg), so there is no
+      // way to consult the `users` table here.
+      //
+      // Since sign-in opened to the whole @bu.edu domain, that gap became real
+      // rather than theoretical: a student CAN now satisfy this check. The actual
+      // admin gate is app/admin/layout.tsx resolving actor() per request, plus
+      // requireAdmin/requireSuper on every route. Treat this as UX only — it exists
+      // to send a signed-out visitor to /login, not to protect anything.
       if (pathname.startsWith("/admin")) return !!auth?.user;
       return true;
     },
