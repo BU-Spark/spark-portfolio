@@ -2,7 +2,7 @@
 // admin-added projects alike), each with its own metadata for SEO/sharing.
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { getProject, getProjectForViewer, getProjectRedirect } from "@/lib/db";
+import { getProject, getProjectForViewer, getProjectRedirect, getGallerySettings } from "@/lib/db";
 import { auth } from "@/auth";
 
 /**
@@ -18,6 +18,7 @@ async function readProject(slug: string) {
 import { projectDisciplines } from "@/lib/project";
 import { cleanBlurb } from "@/lib/gdocs";
 import ProjectView from "@/components/ProjectView";
+import SuggestEdit from "@/components/SuggestEdit";
 import { SITE_URL } from "@/lib/site";
 
 const BASE = SITE_URL;
@@ -63,6 +64,8 @@ export default async function ProjectPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const [session, settings] = await Promise.all([auth(), getGallerySettings()]);
+  const signedIn = !!session?.user?.email;
   const project = await readProject(slug);
   if (!project) {
     // Slug may belong to a record that was merged away — 308 to the survivor.
@@ -91,6 +94,13 @@ export default async function ProjectPage({
         dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
       />
       <ProjectView project={project} />
+      {/* Signed-in @bu.edu viewers can propose the missing metadata. Mounted server-
+          side on the session so an anonymous visitor never receives the form at all
+          — the API re-checks the session regardless, this just avoids shipping UI
+          that could only fail. */}
+      {signedIn && (
+        <SuggestEdit project={project} topicVocabulary={settings.topics ?? []} />
+      )}
     </>
   );
 }

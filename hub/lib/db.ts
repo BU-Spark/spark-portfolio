@@ -2919,3 +2919,182 @@ export async function saveDigestCounts(
     JSON.stringify(counts),
   ]);
 }
+
+// ─── Community suggestions ────────────────────────────────────────────────────
+// A signed-in BU viewer proposes missing metadata; an admin accepts or rejects it.
+//
+// Lazily created, mirroring upload_requests and pd_completions rather than adding a
+// migration — the convention for tables outside scripts/db-setup.ts (see CLAUDE.md).
+//
+// APPEND-ONLY IN SPIRIT: `payload` is never rewritten. Review sets status/reviewed_*
+// and leaves the original proposal intact, so "this was suggested and refused" stays
+// answerable. Same reasoning as pd_completions — a mutable row erases the history a
+// supervisor needs.
+//
+// The payload is a whitelisted subset (lib/suggest.ts), NOT a ProjectPatch. Nothing
+// in here can carry visibility, status or featured, so accepting a suggestion cannot
+// escalate privilege even if the reviewer skims.
+let suggestionsEnsured = false;
+async function ensureSuggestionsTable(): Promise<void> {
+  if (suggestionsEnsured) return;
+  await query(
+    `CREATE TABLE IF NOT EXISTS project_suggestions (
+       id           bigserial PRIMARY KEY,
+       project_id   text NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+       submitted_by text NOT NULL,
+       payload      jsonb NOT NULL,
+       status       text NOT NULL DEFAULT 'pending',
+       created_at   timestamptz NOT NULL DEFAULT now(),
+       reviewed_at  timestamptz,
+       reviewed_by  text,
+       review_note  text
+     )`
+  );
+  // Partial index: the only hot query is "what is pending", and pending rows are a
+  // small minority once the queue is worked. Keeps the index off reviewed history.
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_project_suggestions_pending
+       ON project_suggestions (created_at)
+      WHERE status = 'pending'`
+  );
+  suggestionsEnsured = true;
+}
+
+export interface ProjectSuggestion {
+  id: number;
+  projectId: string;
+  projectTitle?: string;
+  ownerOrg?: string;
+  submittedBy: string;
+  payload: Record<string, unknown>;
+  status: string;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  reviewNote: string | null;
+}
+
+/** Record a proposal. Returns the new row's id. */
+export async function createSuggestion(s: {
+  projectId: string;
+  submittedBy: string;
+  // `object`, not Record<string, unknown>: the caller passes a SuggestionPayload
+  // (an interface without an index signature), and widening here is safer than
+  // casting there — the cast would also silence a genuinely wrong argument.
+  payload: object;
+}): Promise<number> {
+  await ensureSuggestionsTable();
+  const rows = await query<{ id: string }>(
+    `INSERT INTO project_suggestions (project_id, submitted_by, payload)
+     VALUES ($1, $2, $3::jsonb) RETURNING id`,
+    [s.projectId, s.submittedBy, JSON.stringify(s.payload)]
+  );
+  return Number(rows[0].id);
+}
+
+/**
+ * How many pending suggestions this person already has on this project. The route
+ * uses it to refuse a flood — one signed-in account should not be able to fill the
+ * review queue for a project it merely has read access to.
+ */
+export async function countPendingSuggestions(projectId: string, email: string): Promise<number> {
+  await ensureSuggestionsTable();
+  const rows = await query<{ n: string }>(
+    `SELECT count(*) n FROM project_suggestions
+      WHERE project_id = $1 AND lower(submitted_by) = lower($2) AND status = 'pending'`,
+    [projectId, email]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Review queue, org-scoped like every other admin worklist. */
+export async function listSuggestions(
+  status: string,
+  actor?: { org: string; isSuper: boolean }
+): Promise<ProjectSuggestion[]> {
+  await ensureSuggestionsTable();
+  const rows = await query<Record<string, unknown>>(
+    `SELECT s.id, s.project_id, s.submitted_by, s.payload, s.status, s.created_at,
+            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org
+       FROM project_suggestions s
+       JOIN projects p ON p.id = s.project_id
+      WHERE s.status = $1 AND ($2 OR p.owner_org = $3)
+      ORDER BY s.created_at ASC`,
+    [status, actor?.isSuper ?? true, actor?.org ?? "spark"]
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    projectId: String(r.project_id),
+    projectTitle: r.title ? String(r.title) : undefined,
+    ownerOrg: r.owner_org ? String(r.owner_org) : undefined,
+    submittedBy: String(r.submitted_by),
+    payload: (r.payload ?? {}) as Record<string, unknown>,
+    status: String(r.status),
+    createdAt: String(r.created_at),
+    reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+    reviewedBy: r.reviewed_by ? String(r.reviewed_by) : null,
+    reviewNote: r.review_note ? String(r.review_note) : null,
+  }));
+}
+
+/** One suggestion with its project's org, for the route guard. */
+export async function getSuggestion(id: number): Promise<ProjectSuggestion | null> {
+  await ensureSuggestionsTable();
+  const rows = await query<Record<string, unknown>>(
+    `SELECT s.id, s.project_id, s.submitted_by, s.payload, s.status, s.created_at,
+            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org
+       FROM project_suggestions s JOIN projects p ON p.id = s.project_id
+      WHERE s.id = $1`,
+    [id]
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: Number(r.id),
+    projectId: String(r.project_id),
+    projectTitle: r.title ? String(r.title) : undefined,
+    ownerOrg: r.owner_org ? String(r.owner_org) : undefined,
+    submittedBy: String(r.submitted_by),
+    payload: (r.payload ?? {}) as Record<string, unknown>,
+    status: String(r.status),
+    createdAt: String(r.created_at),
+    reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
+    reviewedBy: r.reviewed_by ? String(r.reviewed_by) : null,
+    reviewNote: r.review_note ? String(r.review_note) : null,
+  };
+}
+
+/**
+ * Close out a suggestion. Guarded on `status = 'pending'` in SQL so two admins
+ * clicking accept at the same moment cannot both apply it — the second UPDATE
+ * matches zero rows and returns false, rather than double-writing the project.
+ */
+export async function reviewSuggestion(
+  id: number,
+  verdict: "accepted" | "rejected",
+  reviewedBy: string,
+  note?: string | null
+): Promise<boolean> {
+  await ensureSuggestionsTable();
+  const rows = await query<{ id: string }>(
+    `UPDATE project_suggestions
+        SET status = $1, reviewed_at = now(), reviewed_by = $2, review_note = $3
+      WHERE id = $4 AND status = 'pending'
+      RETURNING id`,
+    [verdict, reviewedBy, note ?? null, id]
+  );
+  return rows.length > 0;
+}
+
+/** Pending count for the admin rail badge. */
+export async function countPendingSuggestionsAll(
+  actor?: { org: string; isSuper: boolean }
+): Promise<number> {
+  await ensureSuggestionsTable();
+  const rows = await query<{ n: string }>(
+    `SELECT count(*) n FROM project_suggestions s JOIN projects p ON p.id = s.project_id
+      WHERE s.status = 'pending' AND ($1 OR p.owner_org = $2)`,
+    [actor?.isSuper ?? true, actor?.org ?? "spark"]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
