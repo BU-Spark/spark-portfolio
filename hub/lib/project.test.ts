@@ -24,6 +24,7 @@ function project(over: Partial<Project> = {}): Project {
     tech: ["React"],
     repoUrl: "https://github.com/x/y",
     images: ["projects/a.webp"],
+    topics: ["Housing & Urban Development"],
     runs: [run()],
     ...over,
   };
@@ -41,6 +42,11 @@ describe("missingInfo", () => {
     expect(m).toContain("GitHub repo");
     expect(m).toContain("Description");
     expect(m).toContain("Images");
+  });
+  it("flags an untagged project", () => {
+    expect(missingInfo(project({ topics: [] }))).toContain("Topics");
+    expect(missingInfo(project({ topics: undefined }))).toContain("Topics");
+    expect(missingInfo(project())).not.toContain("Topics");
   });
   it("treats whitespace-only repo/blurb as missing and null images array", () => {
     expect(missingInfo(project({ repoUrl: "   " }))).toContain("GitHub repo");

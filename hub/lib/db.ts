@@ -2802,6 +2802,8 @@ export async function backlogCounts(scope: {
        WHERE ($1 OR owner_org = $2) AND coalesce(array_length(tech, 1), 0) = 0
      UNION ALL SELECT 'PD link', count(*)::int FROM projects
        WHERE ($1 OR owner_org = $2) AND coalesce(btrim(pd_url), '') = ''
+     UNION ALL SELECT 'Topics', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2) AND coalesce(array_length(topics, 1), 0) = 0
      UNION ALL SELECT 'Contributors', count(*)::int FROM projects p
        WHERE ($1 OR p.owner_org = $2)
          AND NOT EXISTS (SELECT 1 FROM contributors c WHERE c.project_id = p.id)`,

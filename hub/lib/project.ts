@@ -91,6 +91,10 @@ export function missingInfo(p: Project): string[] {
   if (!p.repoUrl || !p.repoUrl.trim()) out.push("GitHub repo");
   if (!p.blurb || !p.blurb.trim()) out.push("Description");
   if (!p.images || p.images.filter(Boolean).length === 0) out.push("Images");
+  // Subject-matter topics drive the Topic facet. An untagged project is invisible
+  // to every topic filter, so this is a real gap rather than cosmetic metadata —
+  // and unlike Contributors it is public data, so no projection guard is needed.
+  if (!p.topics || p.topics.length === 0) out.push("Topics");
   // Admin-only: contributorCount is set only on the admin list projection. When
   // defined and zero, the project has no student contributors loaded yet. Guarded
   // with `=== 0` so public payloads (undefined) never flag this.

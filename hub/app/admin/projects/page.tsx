@@ -82,7 +82,7 @@ function statusBadgeStyle(status: ProjectStatus | undefined) {
   return { color, background: `${color}14`, border: `1px solid ${color}44` };
 }
 
-const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Contributors"] as const;
+const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Topics", "Contributors"] as const;
 
 // Compact pill label for each missingInfo() field shown next to a row title.
 const MISSING_PILL: Record<string, string> = {
@@ -91,6 +91,7 @@ const MISSING_PILL: Record<string, string> = {
   "GitHub repo": "no repo",
   Description: "no description",
   Images: "no images",
+  Topics: "no topic",
   Contributors: "no contributors",
 };
 
