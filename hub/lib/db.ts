@@ -2967,6 +2967,13 @@ export interface ProjectSuggestion {
   projectId: string;
   projectTitle?: string;
   ownerOrg?: string;
+  /**
+   * The project's CURRENT values for the suggestable fields, so the review UI can
+   * show which proposals would actually be written. applicableFields() skips
+   * anything already populated, and a queue that hides that would have the reviewer
+   * click accept expecting six changes and get two.
+   */
+  current?: Record<string, unknown>;
   submittedBy: string;
   payload: Record<string, unknown>;
   status: string;
@@ -3017,7 +3024,8 @@ export async function listSuggestions(
   await ensureSuggestionsTable();
   const rows = await query<Record<string, unknown>>(
     `SELECT s.id, s.project_id, s.submitted_by, s.payload, s.status, s.created_at,
-            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org
+            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org,
+            p.blurb, p.repo_url, p.prod_url, p.tech, p.topics, p.client_desc
        FROM project_suggestions s
        JOIN projects p ON p.id = s.project_id
       WHERE s.status = $1 AND ($2 OR p.owner_org = $3)
@@ -3036,6 +3044,14 @@ export async function listSuggestions(
     reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
     reviewedBy: r.reviewed_by ? String(r.reviewed_by) : null,
     reviewNote: r.review_note ? String(r.review_note) : null,
+    current: {
+      blurb: r.blurb ?? "",
+      repoUrl: r.repo_url ?? null,
+      prodUrl: r.prod_url ?? null,
+      tech: r.tech ?? [],
+      topics: r.topics ?? [],
+      clientDesc: r.client_desc ?? null,
+    },
   }));
 }
 
@@ -3044,7 +3060,8 @@ export async function getSuggestion(id: number): Promise<ProjectSuggestion | nul
   await ensureSuggestionsTable();
   const rows = await query<Record<string, unknown>>(
     `SELECT s.id, s.project_id, s.submitted_by, s.payload, s.status, s.created_at,
-            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org
+            s.reviewed_at, s.reviewed_by, s.review_note, p.title, p.owner_org,
+            p.blurb, p.repo_url, p.prod_url, p.tech, p.topics, p.client_desc
        FROM project_suggestions s JOIN projects p ON p.id = s.project_id
       WHERE s.id = $1`,
     [id]
@@ -3063,6 +3080,14 @@ export async function getSuggestion(id: number): Promise<ProjectSuggestion | nul
     reviewedAt: r.reviewed_at ? String(r.reviewed_at) : null,
     reviewedBy: r.reviewed_by ? String(r.reviewed_by) : null,
     reviewNote: r.review_note ? String(r.review_note) : null,
+    current: {
+      blurb: r.blurb ?? "",
+      repoUrl: r.repo_url ?? null,
+      prodUrl: r.prod_url ?? null,
+      tech: r.tech ?? [],
+      topics: r.topics ?? [],
+      clientDesc: r.client_desc ?? null,
+    },
   };
 }
 
