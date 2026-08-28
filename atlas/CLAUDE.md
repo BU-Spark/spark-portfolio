@@ -1,9 +1,9 @@
-# BU Spark! Project Gallery — project guide
+# Atlas — the BU Spark! project portfolio (guide)
 
 Next.js 15 (App Router) + TS + React 19 gallery/admin for BU Spark! projects.
 Backend is **live**: Railway Postgres (`pg`) + Railway S3 + Auth.js (Google OAuth,
-`@bu.edu` allowlist). Repo is the `BU-Spark/spark-portfolio` monorepo, this app in
-`hub/`. Design is inline-style; fonts are IBM Plex Sans (body) and Space Grotesk
+`@bu.edu` allowlist). Repo is the `BU-Spark/spark-portfolio` monorepo, this app in `atlas/`
+(called `hub/` before 2026-08; `hub/` is now the link-in-bio page). Design is inline-style; fonts are IBM Plex Sans (body) and Space Grotesk
 (display/bold).
 
 ## Where this actually runs (measured 2026-08-24)
@@ -16,7 +16,7 @@ disagree — check before assuming, and note the Vercel one is expected to be to
 | `sparkshowcase.vercel.app` | interim host, **current code**, kept alive only until the Worker is redeployed |
 | `hub.buspark.io` / `int.hub.buspark.io` | **never existed.** No DNS record on Cloudflare's own nameservers |
 
-`hub/` is built for Cloudflare Workers: `wrangler.jsonc` (prod) / `wrangler.int.jsonc`
+`atlas/` is built for Cloudflare Workers: `wrangler.jsonc` (prod) / `wrangler.int.jsonc`
 (int), `@opennextjs/cloudflare`, Hyperdrive. There is no committed `.vercel`;
 `npm run deploy` is `wrangler deploy`.
 

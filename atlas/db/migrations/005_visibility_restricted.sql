@@ -20,7 +20,7 @@
 -- is a separate, deliberate step, run after the code that understands the new value
 -- is deployed — otherwise prod holds a value its running code cannot label.
 --
--- Apply with: psql "$DATABASE_URL" -f hub/db/migrations/005_visibility_restricted.sql
+-- Apply with: psql "$DATABASE_URL" -f atlas/db/migrations/005_visibility_restricted.sql
 BEGIN;
 
 -- DROP then ADD, not a pg_constraint guard. Same reasoning as 004: the constraint

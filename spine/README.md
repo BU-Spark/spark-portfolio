@@ -10,7 +10,7 @@ relational model is not._
 ## What is decided
 
 [`vocabularies.md`](vocabularies.md) — the three project axes and the topic taxonomy.
-These are **not proposals**. They are live in `hub/`, applied to 170 projects, and
+These are **not proposals**. They are live in `atlas/`, applied to 170 projects, and
 carry rationale for why each shape was chosen over the obvious alternative. Any
 initiative reading or writing project state should speak these values.
 
@@ -19,7 +19,7 @@ initiative reading or writing project state should speak these values.
 [`open-decisions.md`](open-decisions.md) — five questions that must be answered
 before the relational model is written, each with the evidence for both sides. Two
 of them describe a **live contradiction** between what `Database++/ARCHITECTURE.md`
-mandates and what `hub/` actually ships, so they are not academic.
+mandates and what `atlas/` actually ships, so they are not academic.
 
 ## Prior art
 

@@ -2,7 +2,7 @@
 
 Five questions that must be answered before the relational model is written. Each has
 evidence on both sides. Two are **live contradictions** between what
-`Database++/ARCHITECTURE.md` mandates and what `hub/` ships today, so deciding them
+`Database++/ARCHITECTURE.md` mandates and what `atlas/` ships today, so deciding them
 late means migrating data, not just editing a doc.
 
 Ordered by cost of getting it wrong.
@@ -15,7 +15,7 @@ Ordered by cost of getting it wrong.
 derive from its `project_instance → semester`, so "there is no term column on the
 edge to contradict it."
 
-**hub does exactly that.** `schema.sql:68` — `person_roles.term text`.
+**atlas does exactly that.** `schema.sql:68` — `person_roles.term text`.
 
 **Why it matters, concretely.** With term on the edge, "no term" is a representable
 state that means nothing. `granite-traffic` currently has a PM role row with
@@ -23,7 +23,7 @@ state that means nothing. `granite-traffic` currently has a PM role row with
 that no query can interpret. Under the derived model that row could not exist: no
 instance, no edge.
 
-**The cost of deferring.** Every reconciliation pass written against hub keys on
+**The cost of deferring.** Every reconciliation pass written against atlas keys on
 `(project_id, term, role)`. Changing the model later means migrating every
 `person_roles` row and rewriting those passes.
 
@@ -38,9 +38,9 @@ representable.
 **Database++ mandates lookup tables.** `ARCHITECTURE.md:76-77`: "lookup tables with
 FK, not Postgres ENUMs… a new role is a row, not an ALTER TYPE."
 
-**hub uses `text` + CHECK.** `schema.sql:137-138`.
+**atlas uses `text` + CHECK.** `schema.sql:137-138`.
 
-**Evidence from practice.** hub has now widened a CHECK twice (adding `in_review`,
+**Evidence from practice.** atlas has now widened a CHECK twice (adding `in_review`,
 adding `restricted`). Both required drop-and-recreate, and both needed an explicit
 warning that a `pg_constraint` guard would silently skip and leave the database
 rejecting a valid value. That is real friction, twice — which is the argument
@@ -60,7 +60,7 @@ flip.
 
 ## 3. Free-text term and course — the mess this is already causing
 
-hub stores term as free text in at least four places: `contributors.term`,
+atlas stores term as free text in at least four places: `contributors.term`,
 `person_roles.term`, `projects.blurb_term`, `import_inbox.term`. Course likewise, per
 run.
 
@@ -79,10 +79,10 @@ deriving term from an instance.
 
 ---
 
-## 4. Identity resolution — a gap hub never filled
+## 4. Identity resolution — a gap atlas never filled
 
 Database++ designs `person_identities` (multi-key: bu_email / personal_email /
-airtable_rec / alias) and a `merge_queue` (`ARCHITECTURE.md:133-141`, §3.5). hub has
+airtable_rec / alias) and a `merge_queue` (`ARCHITECTURE.md:133-141`, §3.5). atlas has
 `people.name_key` + `aliases text[]` and nothing else.
 
 **Evidence this is needed, not speculative.** Four duplicate person records were
@@ -111,7 +111,7 @@ intake/proposal layer above project instances (the legacy CRM's
 This changes the shape of the `projects` table itself, so it should be decided before
 that table is locked rather than discovered mid-migration.
 
-**Context from hub.** hub already has a partial answer it did not intend: the
+**Context from atlas.** atlas already has a partial answer it did not intend: the
 `import_inbox` table holds tracker rows that matched no project — effectively a
 pre-project staging area — and `project_suggestions` stages proposed metadata.
 Neither is a proposal *pipeline*, but both suggest the shape is wanted.
@@ -124,15 +124,15 @@ Not decisions, just corrections for anyone reading `ARCHITECTURE.md` literally.
 
 - **Repo layout is inverted.** `ARCHITECTURE.md:515-552` designs Database++ as its own
   top-level monorepo with the showcase migrated in as `apps/showcase`. Reality: spine
-  is a subdirectory inside `spark-portfolio`, alongside `hub/`. Do not follow its file
+  is a subdirectory inside `spark-portfolio`, alongside `atlas/`. Do not follow its file
   tree.
 - **`v_public_projects` is moot.** Described as a migration scaffold for a
-  JSONB-runs-to-relational transition. hub's public filtering is live application
+  JSONB-runs-to-relational transition. atlas's public filtering is live application
   logic; there is no such migration in progress.
 
 ## What is NOT open
 
 Status, visibility and the topic taxonomy. Database++ never decided them — they are
-open questions at `DISCOVERY.md:43-44` and `:47-48` — and hub has since decided all
+open questions at `DISCOVERY.md:43-44` and `:47-48` — and atlas has since decided all
 three with rationale and shipped them across 170 projects. See `vocabularies.md`.
 Re-deriving them from the prior art would be a regression, not a design step.

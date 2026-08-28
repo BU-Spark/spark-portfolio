@@ -15,7 +15,7 @@
 --   active    currently being worked on
 --   complete  work finished
 --
--- Apply with: psql "$DATABASE_URL" -f hub/db/migrations/002_project_status.sql
+-- Apply with: psql "$DATABASE_URL" -f atlas/db/migrations/002_project_status.sql
 BEGIN;
 
 -- Two defaults, deliberately, and the ORDER is the point.

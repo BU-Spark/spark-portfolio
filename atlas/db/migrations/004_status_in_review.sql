@@ -17,7 +17,7 @@
 -- one. Deploy order therefore does not matter for reads. It DOES matter for writes:
 -- run this BEFORE deploying code that can write 'in_review', or the CHECK rejects it.
 --
--- Apply with: psql "$DATABASE_URL" -f hub/db/migrations/004_status_in_review.sql
+-- Apply with: psql "$DATABASE_URL" -f atlas/db/migrations/004_status_in_review.sql
 BEGIN;
 
 -- DROP then ADD rather than a guarded ADD: the constraint already exists from 002 with

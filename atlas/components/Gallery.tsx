@@ -172,7 +172,7 @@ function FacetGroup({
  * Project-state pill, for signed-in BU viewers.
  *
  * Two INDEPENDENT axes, deliberately not merged into one "state" — see the three-axes
- * rule in hub/CLAUDE.md. A project can legitimately show both pills:
+ * rule in atlas/CLAUDE.md. A project can legitimately show both pills:
  *
  *   yellow  status === "in_review"      — a completion was submitted and bounced
  *   pink    visibility === "restricted" — finished, deliberately closed

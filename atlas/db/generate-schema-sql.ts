@@ -2,7 +2,7 @@
 // pg_catalog for exact types + constraint defs).
 //   npx tsx --env-file=.env.local db/generate-schema-sql.ts > schema.sql
 //
-// Lives in db/ rather than scripts/ because hub/.gitignore ignores `scripts/`
+// Lives in db/ rather than scripts/ because atlas/.gitignore ignores `scripts/`
 // wholesale — so the script that produces schema.sql (the file that claims to be
 // the DDL source of truth) was itself untracked and existed only on one laptop.
 // Anyone cloning the repo could read schema.sql but not regenerate it.

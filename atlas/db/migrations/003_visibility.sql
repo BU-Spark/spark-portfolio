@@ -18,7 +18,7 @@
 -- intended launch posture. To instead go live with everything that was previously
 -- published, run the one statement at the bottom of this file.
 --
--- Apply with: psql "$DATABASE_URL" -f hub/db/migrations/003_visibility.sql
+-- Apply with: psql "$DATABASE_URL" -f atlas/db/migrations/003_visibility.sql
 BEGIN;
 
 -- Default 'hidden' is fail-closed: a row created by any path that forgets to set

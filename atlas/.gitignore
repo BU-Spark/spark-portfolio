@@ -43,7 +43,10 @@ data-review/
 .superpowers/
 
 # The monorepo root .gitignore is Python-oriented (ignores *.json, *.png, etc.).
-# Re-include the config/asset types this Next.js app needs so hub/ stays buildable
+# Re-include the config/asset types this Next.js app needs so atlas/ stays buildable
 # after cloning. (Private scripts/*.json, *.csv stay ignored — scripts/ is excluded above.)
 !*.json
 !*.png
+
+# Local wrangler/miniflare state — a sqlite cache was committed by accident.
+.wrangler/

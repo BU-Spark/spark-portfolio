@@ -3,13 +3,13 @@
 Live in production, applied across 170 projects. Any initiative that reads or writes
 project state should use these exact values.
 
-Source of truth today: `hub/lib/data.ts`, mirrored by CHECK constraints in
-`hub/schema.sql`. When spine gets its own storage these move here; until then, hub is
+Source of truth today: `atlas/lib/data.ts`, mirrored by CHECK constraints in
+`atlas/schema.sql`. When spine gets its own storage these move here; until then, atlas is
 the implementation and this file is the contract.
 
 ## Three independent axes on a project
 
-Never derive one from another. This has already caused one near-miss in hub
+Never derive one from another. This has already caused one near-miss in atlas
 (`surfaces` was almost used as an edit boundary) and is the reason `status` exists as
 a separate column.
 
@@ -61,9 +61,9 @@ project work is client-confidential and must never be BU-wide even when finished
 `<> 'hidden'`, which would leak every internal project to anonymous visitors.
 
 ⚠️ `ARCHITECTURE.md:194` still shows `projects.published boolean`. That column is
-deprecated in hub — kept only as a dual-write for rollback safety and derived from
+deprecated in atlas — kept only as a dual-write for rollback safety and derived from
 `visibility`. **Do not implement the boolean.** Anyone building from that schema
-block literally would reintroduce what hub already split into an enum.
+block literally would reintroduce what atlas already split into an enum.
 
 ## Topic taxonomy
 

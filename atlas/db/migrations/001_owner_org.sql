@@ -9,7 +9,7 @@
 -- FROM guarded, so applying twice is a no-op. Rollback lives in
 -- 001_owner_org_rollback.sql.
 --
---   psql "$DATABASE_URL" -f hub/db/migrations/001_owner_org.sql
+--   psql "$DATABASE_URL" -f atlas/db/migrations/001_owner_org.sql
 --
 -- Apply to nonprod first, then prod. DB BEFORE CODE — old code never selects
 -- owner_org (see COLS in lib/db.ts), so the new columns are inert to it; new

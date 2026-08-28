@@ -1050,7 +1050,7 @@ async function ensureIngestTables(): Promise<void> {
   // `ON CONFLICT (org, name_key)` below cannot catch: the PD sync would 500 on that
   // row. Re-running 001 drops it; the DROP is idempotent and safe to repeat.
   //
-  // This MUST stay in step with hub/db/migrations/001_owner_org.sql — on an
+  // This MUST stay in step with atlas/db/migrations/001_owner_org.sql — on an
   // existing DB these are no-ops, but on a FRESH one this lazy DDL is the only
   // thing that runs, so a stale definition here silently recreates the old key.
   await query(

@@ -1,6 +1,6 @@
 -- Rollback for 001_owner_org.sql.
 --
---   psql "$DATABASE_URL" -f hub/db/migrations/001_owner_org_rollback.sql
+--   psql "$DATABASE_URL" -f atlas/db/migrations/001_owner_org_rollback.sql
 --
 -- TWO PRECONDITIONS, both easy to get wrong:
 --
