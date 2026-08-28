@@ -27,6 +27,7 @@ import {
   courseCode,
 } from "@/lib/project";
 import { cleanBlurb } from "@/lib/gdocs";
+import AuthStrip from "@/components/AuthStrip";
 import type { Project, FacetCounts, FacetKey, GallerySettings } from "@/lib/types";
 
 const ACCENT = "#0fa392";
@@ -279,12 +280,15 @@ export default function Gallery({
   settings = DEFAULT_GALLERY_SETTINGS,
   terms,
   studentExperiences = 0,
+  viewerEmail = null,
 }: {
   projects: Project[];
   initialFilters?: InitialFilters;
   settings?: GallerySettings;
   terms?: string[];
   studentExperiences?: number;
+  /** Signed-in BU viewer's email, or null. Resolved server-side; see AuthStrip. */
+  viewerEmail?: string | null;
 }) {
   // Admin-configured vocab + which facets to show (falls back to defaults).
   const disciplines = settings.disciplines;
@@ -439,6 +443,8 @@ export default function Gallery({
               Project Gallery
             </span>
           </div>
+          <div style={{ flex: 1 }} />
+          <AuthStrip email={viewerEmail} />
         </div>
       </header>
 

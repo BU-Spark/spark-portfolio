@@ -24,19 +24,35 @@ export default function AdminShell({
     return <div className="spark-control">{children}</div>;
   }
   if (!hasActor) {
+    // Wording deliberately covers BOTH ways to land here, because this component
+    // cannot tell them apart — it only receives a boolean.
+    //
+    //   (a) an admin whose `users` row was deleted mid-session, and
+    //   (b) since sign-in opened to the whole @bu.edu domain, ANY BU account that
+    //       simply navigated to /admin.
+    //
+    // (b) is now by far the common case and it used to be impossible, so the old
+    // copy — "your admin access has been removed" — told students they had lost
+    // something they never had. The route out is the gallery, not a support ticket.
     return (
       <div className="spark-control" style={{ padding: "80px 24px", textAlign: "center" }}>
         <h1 style={{ fontFamily: "var(--display)", fontSize: 24, marginBottom: 10 }}>
-          Your admin access has been removed
+          This area is for Spark! staff
         </h1>
         <p style={{ color: "var(--sec)", fontSize: 14.5, lineHeight: 1.6 }}>
-          You&rsquo;re still signed in, but this account is no longer on the admin list.
+          You&rsquo;re signed in, but this account isn&rsquo;t on the admin list.
           <br />
-          Ask a super admin to re-add you, or{" "}
-          <a href="/api/auth/signout" style={{ color: "var(--teal-deep)" }}>
-            sign out
+          <a href="/" style={{ color: "var(--teal-deep)" }}>
+            Back to the gallery
           </a>
-          .
+          {" · "}
+          <a href="/api/auth/signout" style={{ color: "var(--teal-deep)" }}>
+            Sign out
+          </a>
+          <br />
+          <span style={{ fontSize: 13 }}>
+            If you should have admin access, ask a super admin to add you.
+          </span>
         </p>
       </div>
     );

@@ -44,6 +44,7 @@ export default async function Home({
   return (
     <div style={{ minHeight: "100vh" }}>
       <Gallery
+        viewerEmail={session?.user?.email ?? null}
         projects={sparkProjects}
         initialFilters={initialFilters}
         settings={settings}
