@@ -22,6 +22,16 @@ describe("safeCallback", () => {
   it("refuses protocol-relative", () => {
     expect(safeCallback("//evil.example/admin", ORIGIN)).toBe("/");
   });
+  it("uses the supplied fallback when there is no usable callbackUrl", () => {
+    // /login passes "/after-login" so a sign-in with no requested destination is
+    // routed by role instead of dumping everyone on the gallery.
+    expect(safeCallback(null, ORIGIN, "/after-login")).toBe("/after-login");
+    expect(safeCallback("", ORIGIN, "/after-login")).toBe("/after-login");
+    expect(safeCallback("https://evil.example/x", ORIGIN, "/after-login")).toBe("/after-login");
+    expect(safeCallback("//evil.example/x", ORIGIN, "/after-login")).toBe("/after-login");
+    // An explicit same-origin destination still wins over the fallback.
+    expect(safeCallback("/admin/projects", ORIGIN, "/after-login")).toBe("/admin/projects");
+  });
   it("refuses junk and empty", () => {
     expect(safeCallback(null, ORIGIN)).toBe("/");
     expect(safeCallback("", ORIGIN)).toBe("/");

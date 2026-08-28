@@ -8,7 +8,16 @@ import { safeCallback } from "@/lib/callback";
 
 export default function LoginClient() {
   const params = useSearchParams();
-  const callbackUrl = safeCallback(params.get("callbackUrl"), window.location.origin);
+  // Resolved inside the click handler, NOT during render: a "use client" component
+  // is still server-rendered first, and touching window there throws
+  // ReferenceError: window is not defined. React recovers on the client so the page
+  // still returns 200, which is exactly why this survived a smoke test.
+  //
+  // No explicit destination -> /after-login, a server route that resolves the actor
+  // and sends admins to /admin and everyone else to the gallery. When Auth.js DID
+  // supply a callbackUrl (bounced off a protected page), that wins: returning
+  // someone to the page they asked for beats a role-appropriate guess.
+  const rawCallback = params.get("callbackUrl");
   // Auth.js sets ?error=AccessDenied when the signIn callback returns false, which
   // now happens for exactly one reason: the address is not @bu.edu.
   const denied = params.get("error") === "AccessDenied";
@@ -75,7 +84,11 @@ export default function LoginClient() {
 
         <button
           type="button"
-          onClick={() => signIn("google", { callbackUrl })}
+          onClick={() =>
+            signIn("google", {
+              callbackUrl: safeCallback(rawCallback, window.location.origin, "/after-login"),
+            })
+          }
           style={{
             width: "100%",
             padding: "14px 18px",
