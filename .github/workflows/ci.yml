@@ -1,0 +1,89 @@
+# Checks on every pull request. Until this existed, nothing on GitHub verified a PR
+# — the only evidence a change worked was whoever opened it saying so, which is how
+# a 185-file PR ended up resting entirely on one person's local test run.
+#
+# No secrets are used and none are needed. `next build` was verified to exit 0 with
+# NO env vars present: every route in the app is dynamic (`force-dynamic`), so
+# nothing touches Postgres, S3 or Auth.js at build time. If a future page is
+# statically prerendered from the database, this job is what will fail — and the fix
+# is to make that page dynamic, not to hand CI a production connection string.
+#
+# INJECTION SURFACE: none. No `github.event.*` value is referenced anywhere, and the
+# only expression in the file is `github.ref` in the concurrency group — a ref name,
+# not attacker-authored text, and not interpolated into any `run:` script. Keep it
+# that way: a PR title or branch name reaching a shell here would be exploitable.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per ref. Pushing a fixup shouldn't leave the previous run burning minutes
+# on a diff nobody will look at again.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  atlas:
+    name: atlas — typecheck, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: atlas
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches atlas/.nvmrc so CI and local can't silently diverge on a Node
+          # version. Cache keyed on the lockfile.
+          node-version-file: atlas/.nvmrc
+          cache: npm
+          cache-dependency-path: atlas/package-lock.json
+
+      # `ci` not `install`: fails on a lockfile that disagrees with package.json
+      # instead of quietly resolving something different from what was tested.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test -- --run
+
+      # Last because it is the slowest, and because a type error should be reported
+      # as a type error rather than as a build failure fifty lines into a bundle log.
+      - name: Next build
+        run: npx next build
+
+  hub:
+    name: hub — generated index.html is current
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: atlas/.nvmrc
+
+      # hub/index.html is GENERATED from links.mjs and committed. Regenerating must
+      # produce no diff — otherwise someone edited the HTML by hand, or edited
+      # links.mjs and forgot to rebuild, and the file that ships stops matching the
+      # file people edit. There is nothing to install; build.mjs has no dependencies.
+      - name: Rebuild and diff
+        run: |
+          node build.mjs
+          if ! git diff --quiet -- index.html; then
+            echo "::error file=hub/index.html::index.html is out of date. Run 'node build.mjs' in hub/ and commit the result."
+            git diff -- index.html | head -40
+            exit 1
+          fi
+          echo "index.html matches links.mjs"

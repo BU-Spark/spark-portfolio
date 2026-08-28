@@ -10,8 +10,12 @@ See `README.md` for the current program layout.
 
 ## Working in the monorepo
 
-- Work in the subdirectory for your initiative: `spine/`, `hub/`,
+- Work in the subdirectory for your initiative: `spine/`, `atlas/`, `hub/`,
   `drive-walker/`, or `semantic-extraction/`.
+- `atlas/` is the project portfolio (the Next.js showcase + admin). It was called
+  `hub/` until 2026-08 — if a doc, commit message or migration comment says `hub/`
+  and means the portfolio, it predates the rename. `hub/` is now the link-in-bio
+  landing page.
 - Read `spine/` before extending an initiative's data model. Integration happens
   through the shared spine.
 - Keep implementation within its initiative directory. Move existing code into

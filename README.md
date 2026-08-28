@@ -7,7 +7,11 @@ piece currently lives on Vercel, in Drive, or in a personal repo — it moves in
 
 ## Layout
 - `spine/` — shared schema & data model (the contract everything speaks to) — **start here**
-- `hub/` — the project showcase website (past = public, active = staff)
+- `atlas/` — **the project portfolio** — the showcase site (past = public, active = staff).
+  Called `hub/` until 2026-08; renamed because Atlas is the project's actual name and
+  `hub/` now means something else.
+- `hub/` — the Spark! link-in-bio landing page: one static page of links out to
+  everything else (programs, bounties, portfolio, socials)
 - `drive-walker/` — Shared Drive walker + archiver / item reduction
 - `semantic-extraction/` — taxonomy + theme index
 

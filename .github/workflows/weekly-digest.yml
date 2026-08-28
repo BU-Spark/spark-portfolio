@@ -15,7 +15,7 @@
 # inlined into a `run:` script.
 #
 # Required repository secrets:
-#   DIGEST_URL    e.g. https://hub.buspark.io/api/digest/weekly
+#   DIGEST_URL    e.g. https://atlas.buspark.io/api/digest/weekly
 #   DIGEST_TOKEN  must match the DIGEST_TOKEN set on the Worker
 name: Weekly approvals digest
 

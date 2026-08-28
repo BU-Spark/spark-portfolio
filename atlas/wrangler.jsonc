@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "spark-portfolio",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-07-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // Workers can't hold long-lived Postgres connections, so every query goes through
+  // Hyperdrive's pooler. lib/db.ts reads env.HYPERDRIVE.connectionString and falls
+  // back to DATABASE_URL for local dev — so the absence of this block was the whole
+  // reason hub.buspark.io returned 500 on every request while int was fine.
+  //
+  // This id must stay pointed at the PROD database and int's at nonprod. To check
+  // which one a binding actually resolves to:
+  //   select count(*) from users where is_super;   -- 2 = prod, 0 = nonprod
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "bca00a5c430447bf9658f69e1b70dc3f"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "atlas.buspark.io",
+      "custom_domain": true
+    }
+  ],
+  "preview_urls": true,
+  // Non-secret runtime config. Kept here rather than as dashboard variables so the
+  // values are reviewable in git and survive a deploy: `wrangler deploy` replaces the
+  // Worker's plaintext vars with exactly this list, silently dropping any set only in
+  // the dashboard. (Secrets are unaffected — those stay in Cloudflare.)
+  //
+  // NEXTAUTH_URL is listed for that reason alone. auth.config.ts sets
+  // `trustHost: true`, so Auth.js derives the URL from the request and doesn't need
+  // it; it's here so deploying doesn't quietly delete a variable someone set by hand.
+  "vars": {
+    "NEXTAUTH_URL": "https://atlas.buspark.io",
+    // Must be a Resend-verified domain. Unset, lib/email.ts falls back to Resend's
+    // sandbox sender, which only delivers to the Resend account owner — so every PM
+    // invite fails regardless of how the domain's DNS is configured.
+    "EMAIL_FROM": "no-reply@buspark.io",
+    // Plain header, no DNS of its own: mail leaves from the no-reply address but a
+    // PM hitting Reply reaches a monitored inbox instead of nothing.
+    "EMAIL_REPLY_TO": "buspark@bu.edu"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
