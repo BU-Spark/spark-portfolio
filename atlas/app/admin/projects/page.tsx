@@ -402,7 +402,20 @@ export default function ManageProjectsPage() {
         fetch(`/api/projects/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ published: true }),
+          // Explicit visibility, never the legacy `published` boolean.
+          //
+          // The boolean path in updateProject deliberately lands on 'restricted', so
+          // an API caller with no concept of tiers cannot expose anything to the whole
+          // BU community. Correct there — but these are admin BUTTONS, and routing
+          // them through the boolean silently turned "Publish 12" into 12 restricted
+          // projects that nobody could see. A UI control knows which state it means
+          // and must say so.
+          //
+          // 'internal' is what this button did before 'restricted' existed: ready,
+          // BU-visible, NOT on the public gallery. The public gallery stays a
+          // per-project opt-in via the toggle in the row, and 'restricted' stays a
+          // deliberate choice in the edit form — neither belongs in a bulk action.
+          body: JSON.stringify({ visibility: "internal" }),
         })
           .then((r) => ({ id, ok: r.ok }))
           .catch(() => ({ id, ok: false }))
@@ -415,8 +428,8 @@ export default function ManageProjectsPage() {
     notify(
       failed ? "err" : "ok",
       failed
-        ? `${succeeded} published, ${failed} failed (missing blurb or course run).`
-        : `${succeeded} project${succeeded !== 1 ? "s" : ""} published.`
+        ? `${succeeded} marked ready, ${failed} failed (missing blurb or course run).`
+        : `${succeeded} project${succeeded !== 1 ? "s" : ""} marked ready — not yet on the public gallery.`
     );
     await refresh();
   };
@@ -430,7 +443,7 @@ export default function ManageProjectsPage() {
         fetch(`/api/projects/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ published: false }),
+          body: JSON.stringify({ visibility: "hidden" }),
         })
           .then((r) => ({ id, ok: r.ok }))
           .catch(() => ({ id, ok: false }))
@@ -690,7 +703,20 @@ export default function ManageProjectsPage() {
         fetch(`/api/projects/${p.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ published: true }),
+          // Explicit visibility, never the legacy `published` boolean.
+          //
+          // The boolean path in updateProject deliberately lands on 'restricted', so
+          // an API caller with no concept of tiers cannot expose anything to the whole
+          // BU community. Correct there — but these are admin BUTTONS, and routing
+          // them through the boolean silently turned "Publish 12" into 12 restricted
+          // projects that nobody could see. A UI control knows which state it means
+          // and must say so.
+          //
+          // 'internal' is what this button did before 'restricted' existed: ready,
+          // BU-visible, NOT on the public gallery. The public gallery stays a
+          // per-project opt-in via the toggle in the row, and 'restricted' stays a
+          // deliberate choice in the edit form — neither belongs in a bulk action.
+          body: JSON.stringify({ visibility: "internal" }),
         })
           .then((r) => ({ id: p.id, ok: r.ok }))
           .catch(() => ({ id: p.id, ok: false }))
@@ -972,7 +998,7 @@ export default function ManageProjectsPage() {
                 disabled={batchBusy}
                 style={{ padding: "6px 16px", fontSize: 13 }}
               >
-                {batchBusy ? "…" : `Publish ${selectedDraftCount}`}
+                {batchBusy ? "…" : `Mark ${selectedDraftCount} ready`}
               </button>
             )}
             {selectedPublishedCount > 0 && (
@@ -982,7 +1008,7 @@ export default function ManageProjectsPage() {
                 disabled={batchBusy}
                 style={{ padding: "6px 14px" }}
               >
-                {batchBusy ? "…" : `Hide ${selectedPublishedCount}`}
+                {batchBusy ? "…" : `Back to draft (${selectedPublishedCount})`}
               </button>
             )}
             {selectedIds.size === 2 && (
@@ -1060,7 +1086,7 @@ export default function ManageProjectsPage() {
                   disabled={diagnoseBusy}
                   style={{ padding: "5px 14px", fontSize: 12, whiteSpace: "nowrap" }}
                 >
-                  {diagnoseBusy ? "Publishing…" : `Publish all ${readyDraftProjects.length} ready`}
+                  {diagnoseBusy ? "Working…" : `Mark all ${readyDraftProjects.length} ready`}
                 </button>
               )}
               <button
@@ -1635,15 +1661,19 @@ export default function ManageProjectsPage() {
       {/* Confirm "Publish all ready" */}
       <ConfirmModal
         open={confirmPublishAll}
-        title={`Publish ${readyDraftProjects.length} draft${readyDraftProjects.length !== 1 ? "s" : ""}?`}
+        title={`Mark ${readyDraftProjects.length} draft${readyDraftProjects.length !== 1 ? "s" : ""} ready?`}
         body={
           <>
-            These projects will become immediately visible on the public gallery. Please{" "}
-            <strong>manually review</strong> each one before confirming — auto-checks only verify that a
-            blurb and course run are present, not content quality.
+            This moves them out of draft to <strong>BU-visible</strong> — signed-in
+            @bu.edu accounts can see them, but they do <strong>not</strong> go on the
+            public gallery. That stays a per-project opt-in.
+            <br />
+            <br />
+            Auto-checks only verify a blurb and course run are present, not content
+            quality, so this is not a substitute for reading them.
           </>
         }
-        confirmLabel="Yes, publish all"
+        confirmLabel="Mark them ready"
         onConfirm={publishAllReadyConfirmed}
         onCancel={() => setConfirmPublishAll(false)}
       />
