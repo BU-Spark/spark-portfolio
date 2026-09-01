@@ -10,6 +10,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { step as segmentStep, prevIndex } from "@/lib/wheel";
 
 // ── wheel geometry (380×380 viewBox; center 190,190; inner 84; ring 149) ──
 const C = 190;
@@ -72,6 +73,23 @@ export default function DashboardWheel({
   const router = useRouter();
   const [hover, setHover] = useState<number | null>(null);
 
+  // Geometry derives from the ACTUAL segment count. It used to hardcode 6 — 60° per
+  // wedge, and `segments[(i + 5) % 6]` to find the previous one — which was true only
+  // for a super admin. app/admin/page.tsx filters the Settings segment out for
+  // non-supers, so they got 5 segments, `segments[5]` was undefined, and reading
+  // `.solidR` off it threw:
+  //
+  //   TypeError: Cannot read properties of undefined (reading 'solidR')
+  //
+  // That 500'd /admin for every non-super admin — 6 of 8 accounts — while working
+  // fine for the two supers, which is exactly the kind of bug that looks like
+  // "works on my machine".
+  const N = segments.length;
+  const STEP = segmentStep(N);
+  // Nothing to draw, and dividing by zero would produce NaN coordinates that render
+  // as an invisible-but-present SVG. Bail explicitly instead.
+  if (!N) return null;
+
   return (
     <div style={{ position: "relative", width: "100%", maxWidth: 1540, margin: "0 auto", aspectRatio: `${VBW} / ${VBH}` }}>
       {/* ── layer 1: connector elbows ── */}
@@ -82,7 +100,7 @@ export default function DashboardWheel({
         aria-hidden
       >
         {segments.map((s, i) => {
-          const mid = i * 60 + 30;
+          const mid = i * STEP + STEP / 2;
           const [sx, sy] = opolar(R_START, mid);
           const [ax, ay] = ANCHOR[i];
           const on = hover === null || hover === i;
@@ -105,7 +123,7 @@ export default function DashboardWheel({
       >
         <defs>
           {segments.map((s, i) => {
-            const mid = i * 60 + 30;
+            const mid = i * STEP + STEP / 2;
             const [gx1, gy1] = polar(R_INNER, mid);
             const [gx2, gy2] = polar(R_RING, mid);
             return (
@@ -119,13 +137,13 @@ export default function DashboardWheel({
 
         {/* ghost ring arcs */}
         {segments.map((_s, i) => (
-          <path key={`ring-${i}`} d={ringArc(R_RING, i * 60 + 4, (i + 1) * 60 - 4)} fill="none" stroke={`url(#wseg-${i})`} strokeWidth={2.6} strokeLinecap="round" opacity={hover === null || hover === i ? 1 : 0.4} style={{ transition: "opacity .15s" }} />
+          <path key={`ring-${i}`} d={ringArc(R_RING, i * STEP + 4, (i + 1) * STEP - 4)} fill="none" stroke={`url(#wseg-${i})`} strokeWidth={2.6} strokeLinecap="round" opacity={hover === null || hover === i ? 1 : 0.4} style={{ transition: "opacity .15s" }} />
         ))}
 
         {/* clickable wedges */}
         {segments.map((s, i) => {
           const on = hover === i;
-          const [ix, iy] = polar((R_INNER + s.solidR) / 2, i * 60 + 30);
+          const [ix, iy] = polar((R_INNER + s.solidR) / 2, i * STEP + STEP / 2);
           return (
             <g
               key={s.key}
@@ -140,7 +158,7 @@ export default function DashboardWheel({
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(s.href); } }}
               style={{ cursor: "pointer", outline: "none" }}
             >
-              <path d={wedge(R_INNER, s.solidR, i * 60, (i + 1) * 60)} fill={`url(#wseg-${i})`} opacity={hover === null || on ? 1 : 0.55} style={{ transition: "opacity .15s, filter .15s", filter: on ? "brightness(1.07)" : undefined }} />
+              <path d={wedge(R_INNER, s.solidR, i * STEP, (i + 1) * STEP)} fill={`url(#wseg-${i})`} opacity={hover === null || on ? 1 : 0.55} style={{ transition: "opacity .15s, filter .15s", filter: on ? "brightness(1.07)" : undefined }} />
               <g transform={`translate(${ix} ${iy})`} stroke="#fff" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">{s.icon}</g>
             </g>
           );
@@ -148,10 +166,10 @@ export default function DashboardWheel({
 
         {/* white separators */}
         {segments.map((s, i) => {
-          const prev = segments[(i + 5) % 6].solidR;
+          const prev = segments[prevIndex(i, N)].solidR;
           const outer = Math.max(s.solidR, prev);
-          const [x1, y1] = polar(R_INNER, i * 60);
-          const [x2, y2] = polar(outer, i * 60);
+          const [x1, y1] = polar(R_INNER, i * STEP);
+          const [x2, y2] = polar(outer, i * STEP);
           return <line key={`sep-${i}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="#fff" strokeWidth={2.6} strokeLinecap="round" />;
         })}
 
