@@ -11,7 +11,31 @@
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "48e24f5e423548dbb73b44900e9d1cc1"
+      "id": "48e24f5e423548dbb73b44900e9d1cc1",
+      // Required for DEPLOYS, not just local dev, despite what the variable name
+      // suggests. `wrangler deploy` detects an OpenNext project and delegates to
+      // `opennextjs-cloudflare deploy`, which calls getPlatformProxy() to read the
+      // env — and that spins up a local miniflare. Miniflare cannot use a real
+      // Hyperdrive config, so it demands a local Postgres string and throws without
+      // one:
+      //
+      //   UserError: When developing locally, you should use a local Postgres
+      //   connection string to emulate Hyperdrive functionality...
+      //
+      // That error is why every Cloudflare Workers Build failed at the deploy step
+      // while the build itself succeeded — and why `wrangler deploy --dry-run` never
+      // caught it: dry-run skips the OpenNext deploy path entirely.
+      //
+      // The value is a PLACEHOLDER and is never connected to. The deploy path only
+      // constructs miniflare options to read bindings; no query runs. Deliberately
+      // not a real credential — this file is public, and a working connection string
+      // here would be a live database password in git.
+      //
+      // To emulate Hyperdrive properly against a local database, set
+      // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE in your shell
+      // instead of editing this. Note `npm run preview` will now start and fail at
+      // query time rather than failing up front with the message above.
+      "localConnectionString": "postgresql://placeholder:placeholder@127.0.0.1:5432/unused"
     }
   ],
   "routes": [
