@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "spark-hub",
+  "compatibility_date": "2026-08-31",
+
+  // An ASSETS-ONLY Worker: there is no `main`, because there is no server-side
+  // logic. The whole site is one HTML file, one stylesheet and a logo.
+  //
+  // Serves `dist/`, not the directory itself, so the deployed bundle contains only
+  // what a visitor needs. Shipping `.` would upload links.mjs, build.mjs, the README
+  // and package.json to the edge — harmless but noisy, and it invites someone to
+  // assume those files are part of the site.
+  "assets": {
+    "directory": "./dist",
+    // Single-page site: anything else is a genuine 404, not a client-side route.
+    "not_found_handling": "404-page"
+  },
+
+  "routes": [
+    {
+      "pattern": "hub.buspark.io",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": { "enabled": true }
+}
