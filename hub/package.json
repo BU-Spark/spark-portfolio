@@ -1,0 +1,15 @@
+{
+  "name": "spark-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BU Spark! link-in-bio landing page — static, no framework",
+  "scripts": {
+    "build": "node build.mjs",
+    "cf:build": "node build.mjs",
+    "deploy": "wrangler deploy",
+    "serve": "node build.mjs && npx --yes http-server dist -p 8099"
+  },
+  "devDependencies": {
+    "wrangler": "^4.114.0"
+  }
+}

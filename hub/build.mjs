@@ -7,7 +7,7 @@
 //     page whose entire purpose is outbound links — worse for crawlers, worse on a
 //     cold phone connection, and broken with JS off.
 // So the data is a list, and the artifact is plain HTML. index.html is committed.
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
 import { GROUPS, SOCIALS, ICONS, TAGLINE, SPIN_DURATION } from "./links.mjs";
 
 // Escape anything that reaches an HTML text node or attribute. The copy contains
@@ -86,7 +86,26 @@ ${SOCIALS.map(social).join("\n")}
 `;
 
 writeFileSync(new URL("./index.html", import.meta.url), html);
+
+// Also stage dist/ — exactly what a visitor needs and nothing else. wrangler.jsonc
+// serves this directory rather than the repo root, so links.mjs, build.mjs, the
+// README and package.json never reach the edge.
+//
+// index.html is written to BOTH places on purpose: the root copy is committed and
+// CI checks it is current (it is the reviewable artifact), while dist/ is gitignored
+// and exists only to be uploaded.
+const dist = new URL("./dist/", import.meta.url);
+rmSync(dist, { recursive: true, force: true });
+mkdirSync(new URL("./assets/", dist), { recursive: true });
+writeFileSync(new URL("./index.html", dist), html);
+for (const [from, to] of [
+  ["./styles.css", "./styles.css"],
+  ["./assets/spark-logo.png", "./assets/spark-logo.png"],
+]) {
+  copyFileSync(new URL(from, import.meta.url), new URL(to, dist));
+}
+
 const n = GROUPS.flatMap((g) => g.links).length;
-console.log(`index.html written — ${GROUPS.length} groups, ${n} links, ${SOCIALS.length} socials`);
+console.log(`index.html + dist/ written — ${GROUPS.length} groups, ${n} links, ${SOCIALS.length} socials`);
 const placeholders = GROUPS.flatMap((g) => g.links).filter((l) => l.href === "#").map((l) => l.title);
 if (placeholders.length) console.log(`  ${placeholders.length} still pointing at "#": ${placeholders.join(", ")}`);

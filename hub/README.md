@@ -68,13 +68,34 @@ dependencies and needs no `package.json`.
 | | |
 |---|---|
 | `links.mjs` | the link list, icon set, tagline, spin duration — **edit this** |
-| `build.mjs` | renders `links.mjs` → `index.html` |
-| `index.html` | generated; committed; what ships |
+| `build.mjs` | renders `links.mjs` → `index.html`, and stages `dist/` |
+| `index.html` | generated; committed; the reviewable artifact |
 | `styles.css` | all styling, tokens as CSS custom properties |
 | `assets/spark-logo.png` | the hologram asset (from hackbu-web) |
+| `wrangler.jsonc` | assets-only Worker for `hub.buspark.io` |
+| `dist/` | gitignored; what actually gets uploaded |
 
-## Not decided
+`index.html` is written to two places deliberately. The root copy is committed and CI
+fails if it is stale — that is the version a reviewer reads in a diff. `dist/` is
+gitignored and exists only to be deployed, holding exactly the three files a visitor
+needs. Serving the directory itself would upload `links.mjs`, `build.mjs`, the README
+and `package.json` to the edge: harmless, but it invites the assumption that those
+files are part of the site.
 
-Where this deploys. It is static, so anywhere works — Cloudflare Pages, a Worker with
-static assets, or a route on an existing host. The handoff suggests the `hackbu-web`
-Astro repo as one option; it lives here instead so the whole program is in one place.
+## Deploying
+
+Cloudflare Workers, as an **assets-only Worker** — there is no `main`, because there
+is no server-side logic.
+
+```
+npm ci          # wrangler only
+npm run cf:build
+npm run deploy
+```
+
+`cf:build` is an alias for `node build.mjs`, so this directory answers the same build
+command as `atlas/` and the Cloudflare project configs do not have to differ.
+
+`package.json` exists for that reason and for the pinned wrangler — not because the
+page has dependencies. It does not. `package-lock.json` is committed because Workers
+Builds runs `npm clean-install`, which fails outright without a lockfile.
