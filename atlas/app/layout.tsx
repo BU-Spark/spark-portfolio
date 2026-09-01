@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { SITE_URL } from "@/lib/site";
 
@@ -60,8 +58,6 @@ export default function RootLayout({
         {children}
         {/* Privacy-friendly, cookieless web analytics + Core Web Vitals. Both
             no-op locally and until enabled in the Vercel project dashboard. */}
-        <Analytics />
-        <SpeedInsights />
       </body>
     </html>
   );
