@@ -18,9 +18,52 @@ export default function LoginClient() {
   // supply a callbackUrl (bounced off a protected page), that wins: returning
   // someone to the page they asked for beats a role-appropriate guess.
   const rawCallback = params.get("callbackUrl");
-  // Auth.js sets ?error=AccessDenied when the signIn callback returns false, which
-  // now happens for exactly one reason: the address is not @bu.edu.
-  const denied = params.get("error") === "AccessDenied";
+  // Auth.js appends ?error=<code> on any failed sign-in. Rendering the specific
+  // reason matters more than it looks: the default Auth.js error page says only
+  // "Try again", which is indistinguishable between "your address is the wrong
+  // domain" and "the server's OAuth secret is missing" — one is the person's
+  // problem and one is ours.
+  const error = params.get("error");
+  const errorInfo: Record<string, { title: string; body: React.ReactNode }> = {
+    AccessDenied: {
+      title: "That address isn't a @bu.edu account",
+      body: (
+        <>
+          Sign in with your <strong>@bu.edu</strong> Google account. A personal Gmail
+          won&rsquo;t work — and neither will a BU <em>subdomain</em> address like{" "}
+          <strong>@alum.bu.edu</strong> or <strong>@med.bu.edu</strong>, which look like
+          BU addresses but aren&rsquo;t accepted yet. If that&rsquo;s the only address
+          you have, tell the Spark! team.
+        </>
+      ),
+    },
+    Configuration: {
+      title: "Sign-in is misconfigured on our side",
+      body: (
+        <>
+          This isn&rsquo;t your account — the server is missing something it needs to
+          complete a Google sign-in. Please report it; nothing you do will fix it.
+        </>
+      ),
+    },
+    OAuthCallback: {
+      title: "Google sign-in didn't complete",
+      body: (
+        <>
+          The handshake with Google failed on the way back. If retrying doesn&rsquo;t
+          help, this is a server-side problem — please report it.
+        </>
+      ),
+    },
+    OAuthSignin: {
+      title: "Couldn't start Google sign-in",
+      body: <>Something went wrong before reaching Google. Please report it.</>,
+    },
+  };
+  const shown = error ? (errorInfo[error] ?? {
+    title: "Sign-in failed",
+    body: <>Something went wrong. Please report it along with the code below.</>,
+  }) : null;
 
   return (
     <main
@@ -63,7 +106,7 @@ export default function LoginClient() {
           yet, and you can help fill in what&rsquo;s missing on the ones you worked on.
         </p>
 
-        {denied && (
+        {shown && (
           <div
             role="alert"
             style={{
@@ -77,8 +120,12 @@ export default function LoginClient() {
               marginBottom: 20,
             }}
           >
-            That account isn&rsquo;t a BU address. Sign in with your{" "}
-            <strong>@bu.edu</strong> Google account — a personal Gmail won&rsquo;t work.
+            <strong>{shown.title}</strong>
+            <div style={{ marginTop: 5 }}>{shown.body}</div>
+            {/* The raw code, always. It is what makes a bug report actionable. */}
+            <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 11.5, opacity: 0.75 }}>
+              code: {error}
+            </div>
           </div>
         )}
 

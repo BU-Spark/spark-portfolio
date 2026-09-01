@@ -7,7 +7,12 @@ export const authConfig = {
   // One sign-in surface for everyone. A BU viewer bounced from a protected page and
   // an admin arriving deliberately land in the same place; the callbackUrl decides
   // where they end up.
-  pages: { signIn: "/login" },
+  //
+  // `error` points here too, deliberately. Without it, a failed sign-in lands on
+  // Auth.js's built-in page, which says "Try again" and nothing else — a dead end
+  // that cost a round of debugging because nobody could tell a rejected domain from
+  // a broken provider config. /login renders the actual reason (see LoginClient).
+  pages: { signIn: "/login", error: "/login" },
   providers: [],
   callbacks: {
     authorized({ auth, request }) {
