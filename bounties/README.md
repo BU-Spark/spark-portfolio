@@ -109,6 +109,7 @@ that is the natural place to start if transactional email is wanted back.
 ```
 EVENTBRITE_TOKEN        # wrangler secret put EVENTBRITE_TOKEN
 SLACK_SIGNING_SECRET    # wrangler secret put SLACK_SIGNING_SECRET
+DATABASE_URL            # wrangler secret put DATABASE_URL  (required)
 ```
 
 **Local dev** — put a connection string in `bounties/.dev.vars` (gitignored):
