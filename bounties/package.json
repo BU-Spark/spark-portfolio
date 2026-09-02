@@ -3,12 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Spark! Bounty Board — paid challenges across tracks, incl. HackBU x BU IS&T",
+  "description": "The Spark! Bounty Board \u2014 paid challenges across tracks, incl. HackBU x BU IS&T",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^11.2.0",
@@ -20,6 +22,7 @@
     "@astrojs/check": "^0.9.5",
     "@types/node": "^24.9.2",
     "@types/pg": "^8.23.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.114.0"
   }
 }
