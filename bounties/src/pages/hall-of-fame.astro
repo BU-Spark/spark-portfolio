@@ -1,0 +1,86 @@
+---
+import { getCollection } from 'astro:content';
+import Site from '../layouts/Site.astro';
+import { track } from '../lib/tracks';
+import { isPubliclyVisible } from '../lib/spine';
+
+const entries = await getCollection('bounties');
+
+/** No `term` field exists on a bounty, so derive it from the deadline. */
+function term(deadline: string): string {
+  const d = new Date(deadline + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  const m = d.getMonth() + 1;
+  const season = m <= 5 ? 'SPRING' : m <= 8 ? 'SUMMER' : 'FALL';
+  return `${season} '${String(d.getFullYear()).slice(2)}`;
+}
+
+const inductees = entries
+  .filter(
+    (e) =>
+      isPubliclyVisible(e.data.visibility) && e.data.status === 'completed' && e.data.winner
+  )
+  .map((e) => ({
+    title: e.data.title,
+    prize: e.data.prize,
+    winner: e.data.winner as string,
+    submission: e.data.winnerSubmission || '',
+    trackId: e.data.track,
+    term: term(e.data.deadline),
+  }))
+  .sort((a, b) => b.term.localeCompare(a.term) || b.prize - a.prize);
+
+const total = inductees.reduce((sum, i) => sum + i.prize, 0);
+---
+
+<Site
+  nav="hall"
+  title="Hall of Fame — Spark! Bounties"
+  description="Every completed bounty and the builder behind it. Names are permanent."
+>
+  <section class="hero">
+    <h1>They shipped. <em class="gold">They claimed.</em></h1>
+    <p>
+      Every completed bounty and the builder behind it. Names are permanent.
+      {total > 0 && <> ${total} paid out so far.</>}
+    </p>
+  </section>
+
+  <div class="grid-3" style="padding-top:32px">
+    {
+      inductees.map((i) => {
+        const t = track(i.trackId);
+        return (
+          <div class="hof">
+            <div class="hof-top">
+              <span class="inducted">★ INDUCTED · {i.term}</span>
+              <span class={`badge badge-${t.variant}`} style="font-size:10px;padding:3px 8px">
+                {t.label}
+              </span>
+            </div>
+            <h3>{i.title}</h3>
+            <div class="by">
+              by <b>{i.winner}</b>
+            </div>
+            <div class="hof-foot">
+              {i.submission ? (
+                <a href={i.submission} target="_blank" rel="noopener" style="font-size:12px;color:var(--accent);font-weight:600">
+                  View submission →
+                </a>
+              ) : (
+                <span>Claimed</span>
+              )}
+              <b>${i.prize}</b>
+            </div>
+          </div>
+        );
+      })
+    }
+
+    <div class="hof-open">
+      <div class="small">This spot is open.</div>
+      <div class="big">Your name goes here</div>
+      <a class="btn btn-inline" href="/">Browse open bounties →</a>
+    </div>
+  </div>
+</Site>

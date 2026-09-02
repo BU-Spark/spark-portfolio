@@ -1,0 +1,107 @@
+---
+/**
+ * A track landing page.
+ *
+ * This is what a track-specific hostname resolves to, so HackBU can have its
+ * own front door without being a separate application:
+ *   bounties.buspark.io/        -> the whole board, all tracks
+ *   hackbu.buspark.io/          -> /tracks/hackbu (this page)
+ *
+ * See README.md § "Hostnames" for why that is one codebase and not two.
+ */
+import { getCollection } from 'astro:content';
+import Site from '../../layouts/Site.astro';
+import { dueLabel, effectiveStatus } from '../../lib/deadline';
+import { TRACKS, TRACK_IDS, track as trackMeta } from '../../lib/tracks';
+import { isPubliclyVisible } from '../../lib/spine';
+
+export async function getStaticPaths() {
+  return TRACK_IDS.map((id) => ({ params: { track: id } }));
+}
+
+const { track: trackId } = Astro.params;
+const t = trackMeta(trackId);
+
+const entries = await getCollection('bounties');
+const bounties = entries
+  .filter((e) => isPubliclyVisible(e.data.visibility) && (e.data.track ?? 'hackbu') === trackId)
+  .map((e) => ({
+    slug: e.slug,
+    title: e.data.title,
+    prize: e.data.prize,
+    difficulty: e.data.difficulty,
+    deadline: e.data.deadline,
+    tags: e.data.tags,
+    featured: e.data.featured,
+    status: effectiveStatus(e.data.status, e.data.deadline),
+  }))
+  .filter((b) => b.status !== 'completed')
+  .sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+    return a.deadline.localeCompare(b.deadline);
+  });
+
+const open = bounties.filter((b) => b.status === 'open');
+const purse = open.reduce((sum, b) => sum + b.prize, 0);
+---
+
+<Site nav="board" title={`${t.title} — Spark! Bounties`} description={t.blurb}>
+  <section class="hero">
+    <h1>{t.heading}</h1>
+    <p>{t.blurb}</p>
+    <div class="stats-row">
+      <div><b>{open.length}</b><span>open {open.length === 1 ? 'bounty' : 'bounties'}</span></div>
+      <div><b>${purse}</b><span>in prizes</span></div>
+    </div>
+  </section>
+
+  <div class="filters">
+    <span class={`badge badge-${t.variant}`}>{t.label}</span>
+    <a class="pill" href="/">All tracks →</a>
+  </div>
+
+  <div class="grid-3">
+    {
+      bounties.map((b) => {
+        const due = b.status === 'closed' ? { text: 'Closed', urgent: false } : dueLabel(b.deadline);
+        const featured = b.featured && b.status === 'open';
+        return (
+          <a class={`card${featured ? ' featured' : ''}`} href={`/bounties/${b.slug}`}>
+            {featured && <span class="tag-featured">FEATURED</span>}
+            <div class="card-top">
+              <span class={`badge badge-${t.variant}`}>{t.label}</span>
+              <span class={`diff diff-${b.difficulty}`}>{b.difficulty}</span>
+            </div>
+            <h3>{b.title}</h3>
+            <div class="prize">${b.prize}</div>
+            <div class="card-foot">
+              <span class={due.urgent ? 'urgent' : ''}>{due.text}</span>
+              <span class="go">View bounty →</span>
+            </div>
+          </a>
+        );
+      })
+    }
+    {
+      bounties.length === 0 && (
+        <p class="empty">
+          No open bounties on this track right now. <a href="/" style="color:var(--accent);font-weight:600">See the whole board →</a>
+        </p>
+      )
+    }
+  </div>
+
+  <section class="how">
+    <h2>Other tracks</h2>
+    <div class="steps">
+      {
+        TRACK_IDS.filter((id) => id !== trackId).map((id) => (
+          <a class="step" href={`/tracks/${id}`} style="text-decoration:none">
+            <h3 style="margin-top:0">{TRACKS[id].title} →</h3>
+            <p>{TRACKS[id].blurb}</p>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</Site>

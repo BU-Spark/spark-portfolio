@@ -1,0 +1,123 @@
+---
+/**
+ * Shell for the Spark! Bounty Board.
+ *
+ * Owns its own tokens in src/styles/site.css rather than importing a shared
+ * stylesheet. atlas uses the same architecture (plain CSS + :root custom
+ * properties) but different values — see README.md § "Design system" for the
+ * open question about reconciling the two.
+ */
+import '../styles/site.css';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** which nav item to mark current */
+  nav?: 'board' | 'hall' | 'events';
+}
+
+const { title, description = '', nav } = Astro.props as Props;
+
+// Absolute canonical so bounties.buspark.io stays the one indexed origin even
+// if another hostname (e.g. hackbu.buspark.io) serves the same pages.
+const SITE = 'https://bounties.buspark.io';
+const canonical = new URL(Astro.url.pathname, SITE).href;
+
+const NAV = [
+  { key: 'board', label: 'Board', href: '/' },
+  { key: 'hall', label: 'Hall of Fame', href: '/hall-of-fame' },
+  { key: 'events', label: 'Events', href: '/events' },
+  { key: 'how', label: 'How it works', href: '/#how-it-works' },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="canonical" href={canonical} />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      // Runs before paint to prevent a flash. Light-first by design, so an
+      // unset preference follows the OS rather than defaulting to dark.
+      (function () {
+        var stored = localStorage.getItem('spark-bounties-theme');
+        var theme =
+          stored ||
+          (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <header class="bar">
+      <div class="bar-inner">
+        <a href="/" class="wordmark">
+          <!-- decorative: the adjacent text already says "Spark! Bounties" -->
+          <img src="/spark-logo.png" alt="" width="34" height="34" />
+          <span class="rule"></span>
+          <span>SPARK<i>!</i> BOUNTIES</span>
+        </a>
+        <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-controls="mainNav" aria-label="Toggle navigation">☰</button>
+        <nav class="nav" id="mainNav">
+          {
+            NAV.map((item) => (
+              <a href={item.href} aria-current={nav === item.key ? 'page' : undefined}>
+                {item.label}
+              </a>
+            ))
+          }
+          <button class="theme-btn" id="themeBtn" aria-label="Toggle light/dark mode" title="Toggle light/dark mode">
+            <span id="iconSun" hidden>☀</span><span id="iconMoon">☾</span>
+          </button>
+          <a class="nav-cta" href="https://discord.gg/hackbu" target="_blank" rel="noopener">Join Discord</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="foot">
+      <span>Spark! Bounties · Boston University · HackBU bounties run with BU IS&amp;T</span>
+      <span><a href="https://www.bu.edu/spark/" target="_blank" rel="noopener">BU Spark!</a> · <a href="https://discord.gg/hackbu" target="_blank" rel="noopener">Discord</a></span>
+    </footer>
+
+    <script>
+      const btn = document.getElementById('themeBtn');
+      const sun = document.getElementById('iconSun');
+      const moon = document.getElementById('iconMoon');
+
+      function paint() {
+        const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+        // show the icon for the mode you'd switch *to*
+        if (sun) sun.hidden = !dark;
+        if (moon) moon.hidden = dark;
+      }
+      paint();
+
+      btn?.addEventListener('click', () => {
+        const next =
+          document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('spark-bounties-theme', next);
+        paint();
+      });
+
+      const navToggle = document.getElementById('navToggle');
+      navToggle?.addEventListener('click', () => {
+        const open = document.getElementById('mainNav')?.classList.toggle('open');
+        navToggle.setAttribute('aria-expanded', String(!!open));
+      });
+    </script>
+  </body>
+</html>

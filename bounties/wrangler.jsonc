@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "spark-bounties",
+  "compatibility_date": "2026-07-24",
+  // Required. The Mailchimp subscriber hash is an MD5 of the email address, and
+  // Web Crypto has no MD5 — `crypto.subtle.digest` only does SHA-1/256/384/512.
+  // So the API routes genuinely need node:crypto, which only exists on Workers
+  // under this flag. atlas sets the same flag for the same reason class.
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "main": "./dist/_worker.js/index.js",
+  // Secrets are NOT set here — use `wrangler secret put` or the dashboard:
+  //   MAILCHIMP_API_KEY  MAILCHIMP_SERVER_PREFIX  MAILCHIMP_AUDIENCE_ID
+  //   EVENTBRITE_TOKEN
+  // See README.md § "Environment".
+  "observability": {
+    "enabled": true
+  }
+}

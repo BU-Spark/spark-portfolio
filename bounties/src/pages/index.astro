@@ -1,0 +1,149 @@
+---
+import { getCollection } from 'astro:content';
+import Site from '../layouts/Site.astro';
+import { dueLabel, effectiveStatus } from '../lib/deadline';
+import { TRACKS, TRACK_IDS, track } from '../lib/tracks';
+import { isPubliclyVisible } from '../lib/spine';
+
+const entries = await getCollection('bounties');
+
+const bounties = entries
+  // spine/vocabularies.md: the gallery is opt-in. Filter to `public`, never
+  // `!== 'hidden'` — that would leak internal bounties to anonymous visitors.
+  .filter((e) => isPubliclyVisible(e.data.visibility))
+  .map((e) => ({
+    slug: e.slug,
+    title: e.data.title,
+    prize: e.data.prize,
+    difficulty: e.data.difficulty,
+    deadline: e.data.deadline,
+    tags: e.data.tags,
+    featured: e.data.featured,
+    trackId: e.data.track,
+    status: effectiveStatus(e.data.status, e.data.deadline),
+  }))
+  // completed bounties live in the Hall of Fame, not on the board
+  .filter((b) => b.status !== 'completed')
+  .sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+    return a.deadline.localeCompare(b.deadline);
+  });
+---
+
+<Site
+  nav="board"
+  title="Spark! Bounties — ship real code, get paid"
+  description="Open bounties from BU Spark! and partners. HackBU bounties run with BU IS&T and touch real campus systems."
+>
+  <section class="hero">
+    <h1>Ship real code. <em>Get paid.</em></h1>
+    <p>
+      Open challenges from BU Spark! and partners. HackBU bounties run with BU IS&amp;T and touch
+      real campus systems.
+    </p>
+  </section>
+
+  <div class="filters">
+    <button class="pill" data-track="all" aria-pressed="true">All tracks</button>
+    {
+      TRACK_IDS.map((id) => (
+        <button class="pill" data-track={id} aria-pressed="false">
+          {TRACKS[id].label}
+        </button>
+      ))
+    }
+    <input class="search" id="search" type="search" placeholder="Search bounties" aria-label="Search bounties" />
+  </div>
+
+  <div class="grid-3" id="board">
+    {
+      bounties.map((b) => {
+        const t = track(b.trackId);
+        const due = b.status === 'closed' ? { text: 'Closed', urgent: false } : dueLabel(b.deadline);
+        // a closed bounty shouldn't keep drawing the eye as featured
+        const featured = b.featured && b.status === 'open';
+        return (
+          <a
+            class={`card${featured ? ' featured' : ''}`}
+            href={`/bounties/${b.slug}`}
+            data-card
+            data-track={b.trackId}
+            data-search={`${b.title} ${b.tags.join(' ')} ${t.label}`.toLowerCase()}
+          >
+            {featured && <span class="tag-featured">FEATURED</span>}
+            <div class="card-top">
+              <span class={`badge badge-${t.variant}`}>{t.label}</span>
+              <span class={`diff diff-${b.difficulty}`}>{b.difficulty}</span>
+            </div>
+            <h3>{b.title}</h3>
+            <div class="prize">${b.prize}</div>
+            <div class="card-foot">
+              <span class={due.urgent ? 'urgent' : ''}>{due.text}</span>
+              <span class="go">View bounty →</span>
+            </div>
+          </a>
+        );
+      })
+    }
+    <p class="empty" id="empty" hidden>No bounties match that filter.</p>
+  </div>
+
+  <section class="how" id="how-it-works">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <h3>Pick a bounty</h3>
+        <p>
+          Every bounty has a written brief, a real owner, and a deadline. Read it, decide if it's
+          yours.
+        </p>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <h3>Register interest</h3>
+        <p>
+          Tell us you're in — solo or looking for teammates. You'll get the brief doc, the repo, and
+          the submission instructions.
+        </p>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <h3>Ship it and claim</h3>
+        <p>
+          Submit before the deadline. Winners get paid and go on the Hall of Fame permanently.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-card]'));
+    const pills = Array.from(document.querySelectorAll<HTMLElement>('.pill[data-track]'));
+    const search = document.getElementById('search') as HTMLInputElement | null;
+    const empty = document.getElementById('empty');
+    let activeTrack = 'all';
+
+    function apply() {
+      const q = (search?.value || '').trim().toLowerCase();
+      let shown = 0;
+      for (const card of cards) {
+        const okTrack = activeTrack === 'all' || card.dataset.track === activeTrack;
+        const okQuery = !q || (card.dataset.search || '').includes(q);
+        const show = okTrack && okQuery;
+        card.hidden = !show;
+        if (show) shown++;
+      }
+      if (empty) empty.hidden = shown > 0;
+    }
+
+    for (const pill of pills) {
+      pill.addEventListener('click', () => {
+        activeTrack = pill.dataset.track || 'all';
+        for (const p of pills) p.setAttribute('aria-pressed', String(p === pill));
+        apply();
+      });
+    }
+    search?.addEventListener('input', apply);
+  </script>
+</Site>
