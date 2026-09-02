@@ -73,7 +73,7 @@ Worth reconciling if/when bounties get relational storage.
   Schema in `src/content/config.ts`. Adding one is a new `.md` file; the filename
   is the slug (Astro reserves `slug:` in frontmatter — do not add it). Because
   content is compiled in, **the site must rebuild to show a new bounty.**
-- **People, interest and teams** — Postgres (`schema.sql`). Two tables:
+- **People, interest and teams** — Postgres (`db-bootstrap.sql`). Two tables:
   `person` and `bounty_interest`, one row per person per bounty.
 - **Events** — Eventbrite via `src/pages/api/events.ts`, falling back to
   `src/lib/events-fallback.json`. The fallback has no year and may be stale, so
@@ -136,7 +136,9 @@ WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://... npm run 
 ## Applying the schema
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+  -v app_password="'...'" -v postgres_password="'...'" \
+  -f db-bootstrap.sql
 ```
 
 Idempotent (`CREATE TABLE IF NOT EXISTS`), so re-running is safe. Note the
@@ -144,14 +146,15 @@ Idempotent (`CREATE TABLE IF NOT EXISTS`), so re-running is safe. Note the
 widening one is a **drop-and-recreate** of the constraint — an add-if-absent
 guard silently leaves the database rejecting values the app thinks are valid.
 
-**The application should not connect as `postgres`.** Create a least-privilege
-role and use that in the connection string:
+`db-bootstrap.sql` is one ordered, idempotent file covering the schema, the
+least-privilege `bounties_app` role, verification queries, and superuser
+rotation. **Read section 4's warning before running it** — rotating the
+`postgres` password does not update Railway's own service variables.
 
-```sql
-CREATE ROLE bounties_app WITH LOGIN PASSWORD '...';
-GRANT SELECT, INSERT, UPDATE, DELETE ON person, bounty_interest TO bounties_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bounties_app;
-```
+**The application must not connect as `postgres`.** Section 2 creates
+`bounties_app`, which holds SELECT/INSERT/UPDATE/DELETE on the two tables and
+nothing else — verified: it cannot CREATE TABLE, DROP TABLE, read `pg_authid`,
+or create roles.
 
 ## Cloudflare notes
 
