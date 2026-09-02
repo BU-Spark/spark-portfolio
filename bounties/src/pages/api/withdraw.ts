@@ -1,49 +1,46 @@
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
-import mailchimp, { AUDIENCE_ID } from '../../lib/mailchimp';
-import crypto from 'node:crypto';
+import { withDb, removeInterest, countsFor } from '../../lib/db';
 import { rateLimit, rateLimitResponse, getClientIp } from '../../lib/rate-limit';
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   const ip = getClientIp(request);
   const rl = rateLimit(ip, { name: 'withdraw', limit: 10, windowSec: 60 });
   if (!rl.allowed) return rateLimitResponse(rl);
 
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
-    const { email, bounty_slug, type } = body;
+    body = await request.json();
+  } catch {
+    return json({ error: 'Invalid JSON' }, 400);
+  }
 
-    if (!email || !bounty_slug || !type) {
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), { status: 400 });
-    }
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  const bounty_slug = typeof body.bounty_slug === 'string' ? body.bounty_slug.trim() : '';
 
-    const subscriberHash = crypto.createHash('md5').update(email.toLowerCase()).digest('hex');
-    const tag = type === 'interested' ? `interested:${bounty_slug}` : `team:${bounty_slug}`;
+  if (!email || !bounty_slug) return json({ error: 'Missing required fields' }, 400);
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(bounty_slug)) return json({ error: 'Invalid slug format' }, 400);
 
-    // Remove the primary tag + any working mode tags (don't delete the contact)
-    const tagsToRemove: { name: string; status: string }[] = [{ name: tag, status: 'inactive' }];
-    if (type === 'interested') {
-      tagsToRemove.push({ name: `solo:${bounty_slug}`, status: 'inactive' });
-      tagsToRemove.push({ name: `has-team:${bounty_slug}`, status: 'inactive' });
-
-      // Also remove any team-group tags for this bounty
-      try {
-        const memberInfo = await (mailchimp as any).lists.getListMember(AUDIENCE_ID, subscriberHash, { fields: ['tags'] });
-        const teamGroupTags = (memberInfo.tags || [])
-          .filter((t: any) => t.name.startsWith(`team-group:${bounty_slug}:`))
-          .map((t: any) => ({ name: t.name, status: 'inactive' }));
-        tagsToRemove.push(...teamGroupTags);
-      } catch {}
-    }
-    await (mailchimp as any).lists.updateListMemberTags(AUDIENCE_ID, subscriberHash, {
-      tags: tagsToRemove,
+  try {
+    // One row per (person, bounty), so withdrawing is a single delete —
+    // the Mailchimp version had to deactivate the intent tag, both working-mode
+    // tags, and every team-group tag for the bounty. The person row is kept.
+    const { removed, counts } = await withDb(locals, async (db) => {
+      const n = await removeInterest(db, { bountySlug: bounty_slug, email });
+      return { removed: n, counts: await countsFor(db, bounty_slug) };
     });
 
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
-  } catch (err: any) {
-    const detail = err?.response?.body?.detail || err?.message || String(err);
-    console.error('Withdraw API error:', err?.response?.body || err);
-    return new Response(JSON.stringify({ error: 'Internal server error', detail }), { status: 500 });
+    return json({ success: true, removed, counts });
+  } catch (err) {
+    console.error('Withdraw API error:', err instanceof Error ? err.message : String(err));
+    return json({ error: 'Could not withdraw right now' }, 500);
   }
 };
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}

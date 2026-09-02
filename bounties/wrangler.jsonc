@@ -2,18 +2,39 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "spark-bounties",
   "compatibility_date": "2026-07-24",
-  // Required. The Mailchimp subscriber hash is an MD5 of the email address, and
-  // Web Crypto has no MD5 — `crypto.subtle.digest` only does SHA-1/256/384/512.
-  // So the API routes genuinely need node:crypto, which only exists on Workers
-  // under this flag. atlas sets the same flag for the same reason class.
+  // Required by `pg`, which reaches for node:net/node:tls. (It was previously
+  // required for node:crypto's MD5 — that need went away with Mailchimp, but
+  // the Postgres driver needs the flag regardless.) atlas sets the same flag.
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"
   },
   "main": "./dist/_worker.js/index.js",
-  // Secrets are NOT set here — use `wrangler secret put` or the dashboard:
-  //   MAILCHIMP_API_KEY  MAILCHIMP_SERVER_PREFIX  MAILCHIMP_AUDIENCE_ID
+  // Workers cannot hold long-lived Postgres connections, so every query goes
+  // through Hyperdrive's pooler. src/lib/db.ts reads
+  // locals.runtime.env.HYPERDRIVE.connectionString and falls back to
+  // DATABASE_URL for local dev. Per atlas/wrangler.jsonc, the ABSENCE of this
+  // block is what made hub.buspark.io return 500 on every request — so it must
+  // be filled in before deploy, not after.
+  //
+  // Create it against Railway's PUBLIC proxy endpoint (*.proxy.rlwy.net), never
+  // *.railway.internal, which does not resolve outside Railway's network:
+  //   wrangler hyperdrive create spark-bounties --connection-string="postgresql://..."
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_ME_WITH_HYPERDRIVE_ID",
+      // Required for DEPLOYS too, not just local dev, despite the name: wrangler
+      // calls getPlatformProxy() to read the env, which spins up miniflare, and
+      // miniflare cannot use a real Hyperdrive config — it throws without this.
+      // A placeholder is fine (atlas uses the same one). To point local dev at a
+      // real database, override it per-shell instead of editing this file:
+      //   WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://...
+      "localConnectionString": "postgresql://placeholder:placeholder@127.0.0.1:5432/unused"
+    }
+  ],
+  // Secrets are NOT set here — use `wrangler secret put`:
   //   EVENTBRITE_TOKEN
   // See README.md § "Environment".
   "observability": {

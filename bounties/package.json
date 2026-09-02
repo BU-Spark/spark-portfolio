@@ -13,11 +13,13 @@
   "dependencies": {
     "@astrojs/cloudflare": "^11.2.0",
     "astro": "^4.16.17",
-    "marked": "^17.0.4"
+    "marked": "^17.0.4",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.5",
     "@types/node": "^24.9.2",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.9.3"
   }
 }

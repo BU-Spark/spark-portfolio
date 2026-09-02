@@ -4,8 +4,8 @@ Paid, scoped challenges students can claim and ship. **HackBU × BU IS&T is one
 track on this board, not the board itself** — that framing is already the one
 `hub/links.mjs` uses ("Paid challenges — incl. the HackBU × BU IS&T track").
 
-Astro, static-first, deployed to Cloudflare. Live content is three markdown files
-and two external APIs; there is no database yet (see [Data](#data)).
+Astro, static-first, deployed to Cloudflare Workers, with Postgres on Railway
+behind Hyperdrive.
 
 ## Hostnames
 
@@ -71,45 +71,112 @@ Worth reconciling if/when bounties get relational storage.
 
 - **Bounties** — markdown in `src/content/bounties/`, baked in at build time.
   Schema in `src/content/config.ts`. Adding one is a new `.md` file; the filename
-  is the slug (Astro reserves `slug:` in frontmatter — do not add it).
-- **People, interest and teams** — Mailchimp tags (`interested:<slug>`,
-  `solo:<slug>`, `has-team:<slug>`, `team-group:<slug>:<id>`). This is the
-  closest thing to a database the board has.
+  is the slug (Astro reserves `slug:` in frontmatter — do not add it). Because
+  content is compiled in, **the site must rebuild to show a new bounty.**
+- **People, interest and teams** — Postgres (`schema.sql`). Two tables:
+  `person` and `bounty_interest`, one row per person per bounty.
 - **Events** — Eventbrite via `src/pages/api/events.ts`, falling back to
   `src/lib/events-fallback.json`. The fallback has no year and may be stale, so
   the "next up" treatment is gated behind a `live` flag.
 
-Because bounty content is compiled in, **the site must rebuild to show a new
-bounty.** Anything automating bounty creation needs to trigger a deploy.
+### Why not Mailchimp
+
+hackbu.dev stores interest as Mailchimp tags (`interested:<slug>`,
+`team:<slug>`, `solo:<slug>`, `has-team:<slug>`, `team-group:<slug>:<id>`) and
+stays that way — it is legacy. This board uses Postgres instead, which removed
+more than a dependency:
+
+- Those tags encoded **mutually exclusive facts as independent booleans**, so
+  every write had to explicitly deactivate the conflicting tag. A member with
+  both `solo:x` and `has-team:x` active was representable; a `working_mode`
+  column makes it impossible.
+- Counts needed **all ~1000 members fetched and filtered in JS on every
+  request**. Now one indexed `GROUP BY`.
+- Re-registering meant reconciling tag state by hand. Now
+  `UNIQUE (bounty_slug, person_id)` makes it a plain upsert.
+
+**What was lost:** Mailchimp was also the *mailer* — the confirmation email
+carrying the brief was a Mailchimp Automation triggered on tag-add. Nothing
+sends email now, and the interest form says so ("The brief and repo are linked
+under Resources") rather than promising an inbox. atlas already uses **Resend**;
+that is the natural place to start if transactional email is wanted back.
 
 ## Environment
 
-Set as Worker secrets (`wrangler secret put`), not in this repo:
+**Production** — the database arrives through the `HYPERDRIVE` binding in
+`wrangler.jsonc`, not an env var. The only secret is:
 
 ```
-MAILCHIMP_API_KEY         MAILCHIMP_SERVER_PREFIX     MAILCHIMP_AUDIENCE_ID
-EVENTBRITE_TOKEN
+EVENTBRITE_TOKEN        # wrangler secret put EVENTBRITE_TOKEN
 ```
 
-`MAILCHIMP_AUDIENCE_ID` is a deliberate choice, not a copy-paste: point it at the
-**same** audience as hackbu.dev and interest is shared between the two sites
-(counts match, one signup shows up in both); point it at a **different** one and
-this board is isolated. Mailchimp keys members by `md5(email)`, so a person
-registering on both is idempotent either way.
+**Local dev** — put a connection string in `bounties/.dev.vars` (gitignored):
+
+```
+DATABASE_URL=postgresql://user:password@host:port/db
+```
+
+Two traps, both of which cost real time:
+
+1. **Use Railway's PUBLIC proxy host** (`*.proxy.rlwy.net`), never
+   `*.railway.internal`. The internal hostname only resolves inside Railway's
+   private network — it does not resolve from a laptop and, more importantly,
+   **not from a Cloudflare Worker either**, so a Hyperdrive config built on it
+   can never connect.
+2. **Miniflare requires a password in the string.** A trust-auth local database
+   with no password fails validation before the server even starts.
+
+To point local dev at a real database through the Hyperdrive code path rather
+than the `DATABASE_URL` fallback, override per-shell:
+
+```bash
+WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://... npm run dev
+```
+
+## Applying the schema
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+```
+
+Idempotent (`CREATE TABLE IF NOT EXISTS`), so re-running is safe. Note the
+`spine` storage rule: categoricals are `text` + `CHECK`, not Postgres ENUMs, so
+widening one is a **drop-and-recreate** of the constraint — an add-if-absent
+guard silently leaves the database rejecting values the app thinks are valid.
+
+**The application should not connect as `postgres`.** Create a least-privilege
+role and use that in the connection string:
+
+```sql
+CREATE ROLE bounties_app WITH LOGIN PASSWORD '...';
+GRANT SELECT, INSERT, UPDATE, DELETE ON person, bounty_interest TO bounties_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bounties_app;
+```
 
 ## Cloudflare notes
 
-`nodejs_compat` is **required**, not optional. The Mailchimp subscriber hash is
-an MD5 of the email address and Web Crypto has no MD5 (`crypto.subtle.digest`
-does SHA-1/256/384/512 only), so `src/pages/api/*` genuinely needs
-`node:crypto`. `astro.config.mjs` externalises it so Rollup leaves it alone.
+`nodejs_compat` is **required**: `pg` reaches for `node:net` / `node:tls`.
+(It was previously required for Mailchimp's MD5 subscriber hash via
+`node:crypto`; that need is gone but the driver's remains.)
 
-`@mailchimp/mailchimp_marketing` was **removed** and replaced by a ~100-line
-`fetch` client in `src/lib/mailchimp.ts`. The SDK is a Node/superagent wrapper
-that imports bare `querystring`, `http` and `stream`; externalising those
-cascades without end on Workers. Only four endpoints were ever used, so the REST
-calls are less code than the dependency. The shim keeps the SDK's method names
-and error shape (`err.status`, `err.response.body`) so the routes were untouched.
+`pg` and its dependencies import Node builtins as **bare** specifiers
+(`events`, `net`, `stream`…), which Rollup refuses to bundle — and it reports
+them one at a time, so chasing them individually never ends.
+`astro.config.mjs` rewrites every bare builtin to its `node:`-prefixed form and
+marks those external, leaving them to the runtime.
+
+Per `atlas/lib/db.ts`, **do not hold a `pg.Pool` in the Worker isolate** —
+Hyperdrive owns the origin-side pool and a retained pool's stale sockets cause
+intermittent 1101s. `src/lib/db.ts` therefore opens a `Client` per request and
+closes it in a `finally`.
+
+`hyperdrive[].localConnectionString` is required even for **deploys**, not just
+local dev: wrangler calls `getPlatformProxy()` to read the env, which starts
+miniflare, which cannot use a real Hyperdrive config and throws without it.
+
+Rate limiting is still the in-memory limiter in `src/lib/rate-limit.ts`, which
+resets per isolate and so is weaker on Workers than it looks. atlas uses
+`@upstash/ratelimit`; worth adopting if abuse becomes real.
 
 ## Design system — open question
 

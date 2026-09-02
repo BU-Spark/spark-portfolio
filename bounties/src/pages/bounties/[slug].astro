@@ -250,13 +250,12 @@ const links = [
             last_name: data.get('last_name'),
             email: data.get('email'),
             bounty_slug: form.dataset.slug,
-            bounty_title: form.dataset.title,
             type,
             working_mode: type === 'looking-for-team' ? 'team' : data.get('working_mode'),
           }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
-        show("You're in — check your inbox for the brief.", true);
+        show("You're in. The brief and repo are linked under Resources.", true);
         submit.textContent = 'Registered ✓';
         loadCounts();
       } catch (err) {
