@@ -69,6 +69,39 @@ CREATE INDEX IF NOT EXISTS bounty_interest_team_idx
   ON bounty_interest (bounty_slug, team_id)
   WHERE team_id IS NOT NULL;
 
+-- ── Delivery state ──────────────────────────────────────────────────────────
+-- Signing up and DELIVERING are different facts. Without these, "who did a
+-- bounty" is unanswerable and Hall of Fame stays hand-maintained markdown.
+--
+-- Added with IF NOT EXISTS so this section stays idempotent, and kept on
+-- bounty_interest rather than a separate table: it is one row per
+-- (person, bounty) already, and a submission has no identity of its own yet.
+-- If submissions ever need history (resubmits, reviewer notes), that is when
+-- they earn their own table.
+ALTER TABLE bounty_interest
+  ADD COLUMN IF NOT EXISTS submitted_at  timestamptz,
+  ADD COLUMN IF NOT EXISTS completed_at  timestamptz,
+  ADD COLUMN IF NOT EXISTS payout_cents  integer;
+
+-- Money in integer cents, never float: 0.1 + 0.2 != 0.3 in binary floating
+-- point, and these figures get summed for reporting.
+--
+-- DROP-then-ADD because ALTER TABLE ADD CONSTRAINT has no IF NOT EXISTS, and
+-- this file must survive being re-run.
+ALTER TABLE bounty_interest DROP CONSTRAINT IF EXISTS bounty_interest_payout_nonneg;
+ALTER TABLE bounty_interest ADD  CONSTRAINT bounty_interest_payout_nonneg
+  CHECK (payout_cents IS NULL OR payout_cents >= 0);
+
+-- Paid implies completed. Enforced here rather than in application code so it
+-- cannot be bypassed by a manual UPDATE during a scramble.
+ALTER TABLE bounty_interest DROP CONSTRAINT IF EXISTS bounty_interest_paid_implies_done;
+ALTER TABLE bounty_interest ADD  CONSTRAINT bounty_interest_paid_implies_done
+  CHECK (payout_cents IS NULL OR completed_at IS NOT NULL);
+
+-- Finding completed work is the Hall of Fame query, so index for it.
+CREATE INDEX IF NOT EXISTS bounty_interest_completed_idx
+  ON bounty_interest (bounty_slug, completed_at) WHERE completed_at IS NOT NULL;
+
 -- Convenience views, so answering "who signed up for what" is a one-liner
 -- instead of a join you have to remember. CREATE OR REPLACE keeps them
 -- idempotent. Bounty *titles* live in markdown, not the DB, so these key on
@@ -77,7 +110,8 @@ CREATE OR REPLACE VIEW bounty_roster AS
 SELECT bi.bounty_slug,
        p.email, p.first_name, p.last_name,
        bi.intent, bi.working_mode, bi.team_id,
-       bi.created_at AS joined_at
+       bi.created_at AS joined_at,
+       bi.submitted_at, bi.completed_at, bi.payout_cents
 FROM bounty_interest bi
 JOIN person p ON p.id = bi.person_id;
 
@@ -87,7 +121,10 @@ SELECT p.email, p.first_name, p.last_name,
        count(*)                                        AS bounty_count,
        array_agg(bi.bounty_slug ORDER BY bi.bounty_slug) AS bounties,
        min(bi.created_at)                              AS first_joined,
-       max(bi.created_at)                              AS last_joined
+       max(bi.created_at)                              AS last_joined,
+       -- "who actually delivered", which bounty_count does NOT answer
+       count(bi.completed_at)                          AS completed_count,
+       coalesce(sum(bi.payout_cents), 0)               AS total_payout_cents
 FROM person p
 JOIN bounty_interest bi ON bi.person_id = p.id
 GROUP BY p.id, p.email, p.first_name, p.last_name;

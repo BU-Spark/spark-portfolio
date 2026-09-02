@@ -90,3 +90,28 @@ export function ephemeral(text: string): Response {
     headers: { 'Content-Type': 'application/json' },
   });
 }
+
+/**
+ * Split a slash-command payload into a subcommand and its arguments.
+ *
+ * One Slack command (`/spark`) with subcommands beats one Slack command per
+ * capability: adding `/spark counts` is a code change here, whereas a new
+ * top-level command has to be registered in the Slack app UI, re-approved,
+ * and kept in sync with the deployment. It also keeps signature verification
+ * in exactly one place.
+ *
+ * Slack collapses smart quotes and non-breaking spaces into command text when
+ * people type on a phone, so normalise both before parsing.
+ */
+export function parseCommand(text: string | null | undefined): {
+  sub: string;
+  args: string[];
+} {
+  const cleaned = (text ?? '')
+    .replace(/ /g, ' ') // non-breaking space -> space
+    .replace(/[‘’“”]/g, '') // smart quotes -> gone
+    .trim();
+  if (!cleaned) return { sub: 'help', args: [] };
+  const parts = cleaned.split(/\s+/);
+  return { sub: parts[0].toLowerCase(), args: parts.slice(1) };
+}

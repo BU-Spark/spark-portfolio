@@ -217,21 +217,27 @@ npm run check    # astro type check
 ```
 
 
-## Slack: `/bounty-signups`
+## Slack: one `/spark` command
 
-Comms should not need Postgres access or a CSV download to get an address
-list, so `src/pages/api/slack/signups.ts` backs a slash command:
+Per langdon: a full bot, not a collection of one-off commands. A single Slack
+command with subcommands, backed by one route
+(`src/pages/api/slack/command.ts`):
 
 ```
-/bounty-signups                 -> bounties that have signups
-/bounty-signups plate-gallery   -> count + comma-separated addresses + names
+/spark signups <slug>   addresses + names for one bounty
+/spark counts           signups across every bounty
+/spark help             usage
 ```
 
-Setup (Slack side, api.slack.com/apps -> your app):
+Adding a capability is one entry in that file's HANDLERS map — no new Slack
+command to register, no re-approval, and signature verification stays in one
+place. `list` and `who` are aliases, because people guess them.
+
+Setup (api.slack.com/apps -> your app):
 
 1. **Slash Commands** -> Create New Command
-   - Command: `/bounty-signups`
-   - Request URL: `https://bounties.buspark.io/api/slack/signups`
+   - Command: `/spark`
+   - Request URL: `https://bounties.buspark.io/api/slack/command`
    - Escape channels/users/links: **off** (it would mangle the slug)
 2. **Basic Information** -> copy the *Signing Secret*, then
    `wrangler secret put SLACK_SIGNING_SECRET`
@@ -243,10 +249,13 @@ Two deliberate properties:
   broadcast it to the channel and leave it in Slack's retained history. The
   option is not exposed in code, not merely defaulted.
 - **Requests are signature-verified with a five-minute replay window**, then
-  rate limited (20/min/IP) even when signed. This endpoint is a public URL
-  that returns email addresses; the signature is the only thing in front of
-  it. `src/lib/slack.test.ts` covers both (`npm test`).
+  rate limited even when signed. This is a public URL that returns email
+  addresses; the signature is the only thing in front of it.
+  `src/lib/slack.test.ts` covers both.
 
+Open question for langdon: if this bot grows past the bounty board, it should
+probably not live inside this app — either a `slackbot/` initiative that calls
+each app's API, or each app exposes routes and the bot proxies.
 
 ## Mailchimp: the mailer, not the database
 
@@ -283,3 +292,26 @@ live, or the roster reads 0 while comms still hold 9 names:
 
 The apply path is all-or-nothing and verifies its own counts against Mailchimp
 afterwards, exiting non-zero on a mismatch.
+
+
+## Delivery state: who actually shipped
+
+`bounty_interest` carries `submitted_at`, `completed_at` and `payout_cents`,
+because signing up and DELIVERING are different facts. Without them "who did a
+bounty" is unanswerable and Hall of Fame stays hand-maintained markdown.
+
+    SELECT * FROM bounty_people;   -- bounty_count vs completed_count vs payout
+
+Two invariants live in the database rather than in application code, so a
+manual UPDATE during a scramble cannot bypass them:
+
+- `payout_cents >= 0`
+- a payout requires `completed_at` (paid implies completed)
+
+Money is integer cents, never float — these figures get summed, and
+0.1 + 0.2 != 0.3 in binary floating point.
+
+Kept on `bounty_interest` rather than a separate table: it is already one row
+per (person, bounty) and a submission has no identity of its own yet. When
+submissions need history — resubmits, reviewer notes — that is when they earn
+their own table.

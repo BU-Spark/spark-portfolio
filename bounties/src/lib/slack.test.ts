@@ -6,7 +6,7 @@
  * No test framework on purpose: this is one file guarding one trust boundary.
  */
 import assert from 'node:assert/strict';
-import { verifySlackRequest, ephemeral } from './slack.ts';
+import { verifySlackRequest, ephemeral, parseCommand } from './slack.ts';
 
 const SECRET = 'test_signing_secret';
 const BODY = 'command=%2Fbounty-signups&text=plate-gallery&user_id=U123';
@@ -99,5 +99,44 @@ for (const [name, run] of cases) {
     failed++;
   }
 }
-console.log(failed === 0 ? `\n${cases.length} passed` : `\n${failed} FAILED`);
+// ── parseCommand ────────────────────────────────────────────────────────────
+const parseCases: [string, () => boolean][] = [
+  ['empty text falls back to help', () => parseCommand('').sub === 'help'],
+  ['null/undefined text falls back to help', () => parseCommand(null).sub === 'help'],
+  ['whitespace-only falls back to help', () => parseCommand('   ').sub === 'help'],
+  ['subcommand is lowercased', () => parseCommand('SIGNUPS x').sub === 'signups'],
+  [
+    'args are split and the subcommand dropped',
+    () => {
+      const { sub, args } = parseCommand('signups plate-gallery');
+      return sub === 'signups' && args.length === 1 && args[0] === 'plate-gallery';
+    },
+  ],
+  [
+    'runs of whitespace collapse',
+    () => parseCommand('signups    plate-gallery').args[0] === 'plate-gallery',
+  ],
+  [
+    'a non-breaking space still splits (phones insert these)',
+    () => parseCommand('signups\u00a0plate-gallery').args[0] === 'plate-gallery',
+  ],
+  [
+    'smart quotes are stripped (autocorrect adds them)',
+    () => parseCommand('signups \u201cplate-gallery\u201d').args[0] === 'plate-gallery',
+  ],
+  ['extra args are preserved', () => parseCommand('a b c d').args.length === 3],
+];
+
+for (const [name, run] of parseCases) {
+  try {
+    assert.equal(run(), true);
+    console.log(`  ok   ${name}`);
+  } catch {
+    console.error(`  FAIL ${name}`);
+    failed++;
+  }
+}
+
+const total = cases.length + parseCases.length;
+console.log(failed === 0 ? `\n${total} passed` : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

@@ -1,7 +1,24 @@
 /**
- * Simple in-memory rate limiter.
- * Works per-process; on serverless each cold start resets.
- * Good enough to prevent abuse bursts.
+ * In-memory rate limiter.
+ *
+ * ponytail: per-isolate counters, swap for @upstash/ratelimit if abuse is real.
+ *
+ * Know the ceiling before relying on this. On Cloudflare Workers the limit is
+ * per ISOLATE, not per account, and Cloudflare runs many isolates per colo and
+ * discards them freely. So the effective limit is (configured limit x number
+ * of live isolates) — an attacker spreading requests across colos gets a
+ * multiple of what the numbers here suggest, and a cold start resets a
+ * counter entirely.
+ *
+ * That is acceptable for what it currently guards: accidental double-submits
+ * and casual bursts on /api/respond. It is NOT a security control. The two
+ * endpoints where that distinction matters defend themselves independently:
+ * /api/slack/signups verifies an HMAC signature, and
+ * /api/mailchimp/reconcile requires ADMIN_KEY.
+ *
+ * The upgrade is a shared counter — atlas uses @upstash/ratelimit; Cloudflare
+ * KV or a Durable Object would also work. All three need infrastructure this
+ * project does not have provisioned yet, which is why this is still here.
  */
 
 interface Entry {
