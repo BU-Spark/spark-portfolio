@@ -189,3 +189,24 @@ export async function slugsWithSignups(db: Client): Promise<{ slug: string; n: n
   );
   return rows.map((r) => ({ slug: r.slug, n: Number(r.n) }));
 }
+
+/**
+ * The team id on a person's row for one bounty, if any.
+ *
+ * Read BEFORE deleting on withdrawal: the `team-group:<slug>:<id>` Mailchimp
+ * tag can only be cleared if we still know the id, and after the delete it is
+ * gone. Returns null when there is no row or no team.
+ */
+export async function teamIdFor(
+  db: Client,
+  opts: { bountySlug: string; email: string }
+): Promise<string | null> {
+  const { rows } = await db.query<{ team_id: string | null }>(
+    `SELECT bi.team_id
+       FROM bounty_interest bi
+       JOIN person p ON p.id = bi.person_id
+      WHERE bi.bounty_slug = $1 AND p.email = lower($2)`,
+    [opts.bountySlug, opts.email]
+  );
+  return rows[0]?.team_id ?? null;
+}

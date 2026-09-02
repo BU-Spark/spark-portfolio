@@ -110,6 +110,9 @@ that is the natural place to start if transactional email is wanted back.
 EVENTBRITE_TOKEN        # wrangler secret put EVENTBRITE_TOKEN
 SLACK_SIGNING_SECRET    # wrangler secret put SLACK_SIGNING_SECRET
 DATABASE_URL            # wrangler secret put DATABASE_URL  (required)
+MAILCHIMP_API_KEY       # mailer only — see "Mailchimp" below
+MAILCHIMP_AUDIENCE_ID   # 3baefe8534 ("Spark! Bounty Board")
+ADMIN_KEY               # guards /api/mailchimp/reconcile
 ```
 
 **Local dev** — put a connection string in `bounties/.dev.vars` (gitignored):
@@ -243,3 +246,40 @@ Two deliberate properties:
   rate limited (20/min/IP) even when signed. This endpoint is a public URL
   that returns email addresses; the signature is the only thing in front of
   it. `src/lib/slack.test.ts` covers both (`npm test`).
+
+
+## Mailchimp: the mailer, not the database
+
+Postgres is the source of truth for who signed up. Mailchimp exists so comms
+can pick a tag and hit send without anyone copying a list by hand — the
+workflow that made a CSV export or a Slack command insufficient on their own.
+
+Tags mirror the Postgres row, and the vocabulary is the one ALREADY in the
+"Spark! Bounty Board" audience (also documented in hackbu-web/CLAUDE.md):
+
+    interested:<slug>            registered interest
+    team:<slug>                  wants teammates      (intent = looking_for_team)
+    solo:<slug>                  working alone        (working_mode = solo)
+    has-team:<slug>              already has a team   (working_mode = team)
+    team-group:<slug>:<team_id>  a formed team
+
+`solo:` / `has-team:` are mutually exclusive and Mailchimp cannot express that,
+so every write sets one and explicitly DEACTIVATES the other. Postgres enforces
+the invariant via UNIQUE (bounty_slug, person_id); this keeps the mirror honest.
+
+- `/api/respond` and `/api/withdraw` mirror through `ctx.waitUntil`, so a
+  Mailchimp outage cannot fail a student's signup.
+- `POST /api/mailchimp/reconcile` (Bearer ADMIN_KEY) repairs drift when a
+  fire-and-forget write is lost. `?prune=1` also clears tags Postgres does not
+  back — the only destructive direction, hence opt-in.
+
+### One-time backfill
+
+Nine signups exist only as Mailchimp tags. Migrate them BEFORE the site goes
+live, or the roster reads 0 while comms still hold 9 names:
+
+    npm run backfill              # dry run, reads Mailchimp only
+    npm run backfill -- --apply   # writes Postgres in a single transaction
+
+The apply path is all-or-nothing and verifies its own counts against Mailchimp
+afterwards, exiting non-zero on a mismatch.

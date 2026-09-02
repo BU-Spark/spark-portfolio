@@ -3,6 +3,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { withDb, upsertPerson, setInterest, countsFor } from '../../lib/db';
 import { rateLimit, rateLimitResponse, getClientIp } from '../../lib/rate-limit';
+import { mirror, syncInterest } from '../../lib/mailchimp';
 
 /** 8 hex chars, matching the id shape the Mailchimp `team-group:` tags used. */
 function newTeamId(): string {
@@ -61,6 +62,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
       return countsFor(db, bounty_slug);
     });
+
+    // Postgres is committed; mirror the tags so comms can mail this cohort
+    // from Mailchimp without anyone copying a list by hand. Fire-and-forget.
+    mirror(locals, (env) =>
+      syncInterest(
+        env,
+        { email, firstName: first_name, lastName: last_name },
+        {
+          bountySlug: bounty_slug,
+          intent,
+          workingMode: intent === 'looking_for_team' ? 'solo' : working_mode,
+          teamId,
+        }
+      )
+    );
 
     return json({ success: true, counts, ...(teamId ? { teamId } : {}) });
   } catch (err) {
