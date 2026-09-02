@@ -69,6 +69,29 @@ CREATE INDEX IF NOT EXISTS bounty_interest_team_idx
   ON bounty_interest (bounty_slug, team_id)
   WHERE team_id IS NOT NULL;
 
+-- Convenience views, so answering "who signed up for what" is a one-liner
+-- instead of a join you have to remember. CREATE OR REPLACE keeps them
+-- idempotent. Bounty *titles* live in markdown, not the DB, so these key on
+-- slug only.
+CREATE OR REPLACE VIEW bounty_roster AS
+SELECT bi.bounty_slug,
+       p.email, p.first_name, p.last_name,
+       bi.intent, bi.working_mode, bi.team_id,
+       bi.created_at AS joined_at
+FROM bounty_interest bi
+JOIN person p ON p.id = bi.person_id;
+
+-- One row per PERSON across all bounties: SELECT * FROM bounty_people;
+CREATE OR REPLACE VIEW bounty_people AS
+SELECT p.email, p.first_name, p.last_name,
+       count(*)                                        AS bounty_count,
+       array_agg(bi.bounty_slug ORDER BY bi.bounty_slug) AS bounties,
+       min(bi.created_at)                              AS first_joined,
+       max(bi.created_at)                              AS last_joined
+FROM person p
+JOIN bounty_interest bi ON bi.person_id = p.id
+GROUP BY p.id, p.email, p.first_name, p.last_name;
+
 
 -- =============================================================================
 -- SECTION 2 — least-privilege application role
@@ -100,6 +123,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON person          TO bounties_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON bounty_interest TO bounties_app;
 
 -- bigserial primary keys need the sequences.
+GRANT SELECT ON bounty_roster TO bounties_app;
+GRANT SELECT ON bounty_people TO bounties_app;
+
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bounties_app;
 
 -- So a future table added by SECTION 1 doesn't silently 403 the app.
