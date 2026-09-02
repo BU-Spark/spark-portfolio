@@ -1,17 +1,25 @@
 -- =============================================================================
 -- bounties — database bootstrap & credential rotation
 --
--- Run the sections IN ORDER against the bounties database (Railway: `railway`)
--- as a superuser. Every section is idempotent: re-running is safe.
+-- Run this file AS A WHOLE, against the bounties database (Railway: `railway`),
+-- as a superuser:
 --
--- Replace both placeholders first. Generate strong values with:
+--   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db-bootstrap.sql
+--
+-- Every section is idempotent, so re-running the file is safe.
+--
+-- DO NOT run SECTION 2 on its own. It grants on person / bounty_interest,
+-- which SECTION 1 creates; run out of order it fails with
+-- `ERROR: relation "person" does not exist` and the app ends up with no
+-- table privileges. Section order is a dependency, not a suggestion.
+--
+-- Replace both PUT_A_NEW_..._HERE placeholders first. Generate strong values:
 --   openssl rand -base64 24 | tr -d '/+=' | cut -c1-28
 --
---   :'app_password'    -> the new least-privilege application password
---   :'postgres_password' -> the new superuser password (SECTION 4 only)
---
--- If you are pasting into a GUI that does not support psql variables, just
--- replace the :'...' tokens by hand with quoted literals, e.g. 'abc123'.
+-- These are deliberately plain quoted literals, not psql `:'var'` variables:
+-- psql only interpolates those via -f / stdin, NEVER via -c, and no GUI
+-- console interpolates them at all. Either way you get
+-- `ERROR: syntax error at or near ":"`. Literals work in every client.
 -- =============================================================================
 
 
@@ -80,7 +88,7 @@ $$;
 
 -- Set (or re-set) the password. This is also how you rotate the APP password
 -- later: re-run just this line with a new value.
-ALTER ROLE bounties_app WITH PASSWORD :'app_password';
+ALTER ROLE bounties_app WITH PASSWORD 'PUT_A_NEW_APP_PASSWORD_HERE';
 
 -- No CREATE rights anywhere; connect + use the schema only.
 GRANT CONNECT ON DATABASE railway TO bounties_app;
@@ -150,7 +158,7 @@ SELECT rolsuper OR rolcreatedb OR rolcreaterole AS over_privileged
 -- app keeps working through the rotation.
 -- =============================================================================
 
--- ALTER ROLE postgres WITH PASSWORD :'postgres_password';
+-- ALTER ROLE postgres WITH PASSWORD 'PUT_A_NEW_SUPERUSER_PASSWORD_HERE';
 
 -- Who else can log in? Anything unexpected here is worth asking about.
 SELECT rolname, rolsuper, rolcanlogin
