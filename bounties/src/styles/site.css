@@ -6,70 +6,86 @@
    ═══════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* surfaces */
-  --bg: #ffffff;
+  /* Type — atlas's three roles. Space Grotesk carries display, IBM Plex Sans
+     the body, IBM Plex Mono the eyebrows/labels/counts. Replaces the 1B
+     pairing (Bebas Neue / Montserrat / JetBrains Mono). */
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --body: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  /* surfaces — atlas puts white cards on a warm-grey ground, so a card reads
+     as a card. 1B had white-on-white and leaned on borders alone. */
+  --bg: #f4f5f4;
   --card: #ffffff;
-  --sunken: #f7f7f5;
-  --header: #1a1a1a;
+  --sunken: #f7f9f8;
+  --header: #0e1211;
   --header-line: transparent;
 
   /* text */
-  --ink: #1a1a1a;
-  --ink-2: #444444;
-  --ink-3: #555555;
-  --muted: #6b6b6b;
-  --faint: #999999;
+  --ink: #16191c;
+  --ink-2: #3f4448;
+  --ink-3: #55595e;
+  --muted: #8a8a8a;
+  --faint: #9a9a9a;
 
   /* lines */
-  --border: #e4e4e4;
-  --border-strong: #e4e4e4;
-  --divider: #efefef;
+  --border: #e6e6e6;
+  --border-strong: #d8d8d8;
+  --divider: #ececec;
   --pill-border: #d8d8d8;
 
   /* accent */
-  --accent: #3d8c84;
-  --accent-ink: #2d6e67; /* accent as text on light surfaces */
-  --accent-on: #ffffff; /* text on a filled accent button */
-  --accent-wash: rgba(61, 140, 132, 0.12);
-  --brand-bang: #06b1a2; /* the "!" in the wordmark — bright in both modes */
+  --accent: #0fa392;
+  --accent-ink: #0a7d70;
+  --accent-on: #ffffff;
+  --accent-wash: rgba(15, 163, 146, 0.12);
+  --brand-bang: #0fa392;
 
-  /* semantic */
-  --urgent: #e8573a;
-  --ok-wash: rgba(22, 163, 74, 0.12);
-  --ok-ink: #15803d;
-  --neutral-wash: rgba(26, 26, 26, 0.07);
-  --neutral-ink: #1a1a1a;
+  /* semantic — atlas's ok/amber/danger families */
+  --urgent: #b3261e;
+  --ok-wash: #e4f4ec;
+  --ok-ink: #1f7a4d;
+  --ok-line: #bfe6cf;
+  --neutral-wash: rgba(22, 25, 28, 0.06);
+  --neutral-ink: #16191c;
 
   /* difficulty */
-  --diff-beginner: #15803d;
-  --diff-intermediate: #b45309;
-  --diff-advanced: #b91c1c;
-  --diff-advanced-wash: rgba(185, 28, 28, 0.1);
+  --diff-beginner: #1f7a4d;
+  --diff-intermediate: #9a6a00;
+  --diff-advanced: #b3261e;
+  --diff-advanced-wash: rgba(179, 38, 30, 0.09);
 
   /* hall of fame */
-  --gold: #c9a227;
-  --gold-ink: #8b6914;
+  --gold: #c98a00;
+  --gold-ink: #9a6a00;
 
   /* filter pills (inverted vs page) */
-  --pill-on-bg: #1a1a1a;
+  --pill-on-bg: #16191c;
   --pill-on-ink: #ffffff;
 
-  /* elevation */
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-lift: 0 8px 20px rgba(0, 0, 0, 0.08);
+  /* elevation — atlas's card lift */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-lift: 0 10px 26px rgba(0, 0, 0, 0.1);
   --shadow-panel: 0 4px 20px rgba(0, 0, 0, 0.06);
   --shadow-gold: 0 4px 16px rgba(0, 0, 0, 0.05);
-  --shadow-featured: 0 6px 20px rgba(61, 140, 132, 0.15);
+  --shadow-featured: 0 6px 20px rgba(15, 163, 146, 0.15);
 
-  --page: 1240px;
+  /* radii — atlas scale */
+  --r-xs: 7px;
+  --r-sm: 10px;
+  --r: 14px;
+  --r-lg: 18px;
+
+  --page: 1080px;
   --pad: 40px;
 }
 
+
 [data-theme='dark'] {
-  --bg: #141716;
-  --card: #1b1f1e;
+  --bg: #101413;
+  --card: #191d1c;
   --sunken: rgba(255, 255, 255, 0.04);
-  --header: #0d0f0e;
+  --header: #0e1211;
   --header-line: rgba(255, 255, 255, 0.07);
 
   --ink: #ffffff;
@@ -83,10 +99,11 @@
   --divider: rgba(255, 255, 255, 0.08);
   --pill-border: rgba(255, 255, 255, 0.2);
 
-  --accent: #06b1a2;
-  --accent-ink: #06b1a2;
+  /* lifted off #0fa392 for contrast on a dark ground */
+  --accent: #19c2ae;
+  --accent-ink: #19c2ae;
   --accent-on: #0d0f0e;
-  --accent-wash: rgba(6, 177, 162, 0.15);
+  --accent-wash: rgba(25, 194, 174, 0.15);
 
   --ok-wash: rgba(74, 222, 128, 0.12);
   --ok-ink: #4ade80;
@@ -109,7 +126,7 @@
   --shadow-lift: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.4);
   --shadow-gold: 0 4px 16px rgba(0, 0, 0, 0.3);
-  --shadow-featured: 0 6px 24px rgba(6, 177, 162, 0.18);
+  --shadow-featured: 0 6px 24px rgba(25, 194, 174, 0.18);
 }
 
 /* ─── reset / base ─── */
@@ -121,11 +138,15 @@
 html {
   -webkit-text-size-adjust: 100%;
 }
+::selection {
+  background: rgba(15, 163, 146, 0.25);
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: 'Montserrat', system-ui, -apple-system, sans-serif;
+  font-family: var(--body);
   -webkit-font-smoothing: antialiased;
   transition: background-color 0.2s ease, color 0.2s ease;
   /* keeps the footer at the bottom on short pages (e.g. a detail page) */
@@ -185,10 +206,13 @@ input {
   display: flex;
   align-items: center;
   gap: 11px;
-  font-family: 'Bebas Neue', Impact, sans-serif;
-  font-size: 26px;
+  /* Space Grotesk is not condensed like Bebas, so the wordmark needs a
+     smaller size and tighter tracking to occupy the same space. */
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 21px;
   line-height: 1;
-  letter-spacing: 1px;
+  letter-spacing: -0.2px;
   color: #ffffff;
   white-space: nowrap;
 }
@@ -434,8 +458,9 @@ a.step:hover h3 {
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
 .card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow-lift);
+  border-color: var(--border-strong);
 }
 .card-top {
   display: flex;
@@ -535,10 +560,13 @@ a.step:hover h3 {
   color: var(--ink);
 }
 .label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  letter-spacing: 1.5px;
+  /* atlas sets eyebrows/labels/counts in mono; it runs wider than Montserrat
+     at the same px, so the size and tracking come down. */
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-ink);
+  letter-spacing: 0.8px;
   margin-bottom: 10px;
   text-transform: uppercase;
 }
@@ -560,7 +588,7 @@ a.step:hover h3 {
   text-underline-offset: 2px;
 }
 .prose code {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 0.88em;
   background: var(--sunken);
   border: 1px solid var(--border);
