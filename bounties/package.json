@@ -10,7 +10,8 @@
     "preview": "astro preview",
     "check": "astro check",
     "deploy": "wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "test": "node --experimental-strip-types src/lib/slack.test.ts"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^11.2.0",

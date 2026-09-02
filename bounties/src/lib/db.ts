@@ -157,3 +157,35 @@ export async function countsFor(db: Client, bountySlug: string): Promise<Counts>
   }
   return counts;
 }
+
+export interface RosterRow {
+  email: string;
+  first_name: string;
+  last_name: string;
+  intent: string;
+  working_mode: string;
+}
+
+/**
+ * Everyone signed up for one bounty. Reads the bounty_roster view (see
+ * db-bootstrap.sql) so the join lives in one place.
+ */
+export async function rosterFor(db: Client, bountySlug: string): Promise<RosterRow[]> {
+  const { rows } = await db.query<RosterRow>(
+    `SELECT email, first_name, last_name, intent, working_mode
+       FROM bounty_roster
+      WHERE bounty_slug = $1
+      ORDER BY last_name, first_name`,
+    [bountySlug]
+  );
+  return rows;
+}
+
+/** Slugs that actually have signups, for the "did you mean" reply. */
+export async function slugsWithSignups(db: Client): Promise<{ slug: string; n: number }[]> {
+  const { rows } = await db.query<{ slug: string; n: string }>(
+    `SELECT bounty_slug AS slug, count(*) AS n
+       FROM bounty_interest GROUP BY 1 ORDER BY 1`
+  );
+  return rows.map((r) => ({ slug: r.slug, n: Number(r.n) }));
+}

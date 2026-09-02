@@ -108,6 +108,7 @@ that is the natural place to start if transactional email is wanted back.
 
 ```
 EVENTBRITE_TOKEN        # wrangler secret put EVENTBRITE_TOKEN
+SLACK_SIGNING_SECRET    # wrangler secret put SLACK_SIGNING_SECRET
 ```
 
 **Local dev** — put a connection string in `bounties/.dev.vars` (gitignored):
@@ -210,3 +211,34 @@ npm run dev      # http://localhost:4321
 npm run build
 npm run check    # astro type check
 ```
+
+
+## Slack: `/bounty-signups`
+
+Comms should not need Postgres access or a CSV download to get an address
+list, so `src/pages/api/slack/signups.ts` backs a slash command:
+
+```
+/bounty-signups                 -> bounties that have signups
+/bounty-signups plate-gallery   -> count + comma-separated addresses + names
+```
+
+Setup (Slack side, api.slack.com/apps -> your app):
+
+1. **Slash Commands** -> Create New Command
+   - Command: `/bounty-signups`
+   - Request URL: `https://bounties.buspark.io/api/slack/signups`
+   - Escape channels/users/links: **off** (it would mangle the slug)
+2. **Basic Information** -> copy the *Signing Secret*, then
+   `wrangler secret put SLACK_SIGNING_SECRET`
+3. Install the app to the workspace.
+
+Two deliberate properties:
+
+- **Every reply is ephemeral.** A roster is student PII; `in_channel` would
+  broadcast it to the channel and leave it in Slack's retained history. The
+  option is not exposed in code, not merely defaulted.
+- **Requests are signature-verified with a five-minute replay window**, then
+  rate limited (20/min/IP) even when signed. This endpoint is a public URL
+  that returns email addresses; the signature is the only thing in front of
+  it. `src/lib/slack.test.ts` covers both (`npm test`).
