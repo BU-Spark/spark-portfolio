@@ -315,3 +315,44 @@ Kept on `bounty_interest` rather than a separate table: it is already one row
 per (person, bounty) and a submission has no identity of its own yet. When
 submissions need history — resubmits, reviewer notes — that is when they earn
 their own table.
+
+
+## Deployment: Cloudflare Workers Builds
+
+The `bounties-site` service builds from this directory on every push. Its
+settings live in the Cloudflare dashboard, NOT in this repo, so they are
+recorded here — a wrong value fails in a way the code cannot express:
+
+| Setting        | Value              |
+| -------------- | ------------------ |
+| Root directory | `bounties`         |
+| Build command  | `npm run build`    |
+| Deploy command | leave as generated |
+
+Two things that have already gone wrong:
+
+1. **An empty build command.** Workers Builds went straight from
+   `npm clean-install` to `wrangler versions upload` and failed with
+   `The entry-point file at "dist/_worker.js/index.js" was not found`. Nothing
+   was wrong with the code: `dist/` simply had not been generated. If that
+   error reappears, the build command is empty again.
+2. **`name` in wrangler.jsonc must equal the service name** (`bounties-site`).
+   `wrangler deploy` refuses when they differ. This is why the name here
+   breaks the `spark-*` convention that atlas and hub follow.
+
+Non-production branches run `wrangler versions upload` (uploads a version
+without releasing it); the production branch deploys for real. So a merge to
+`main` publishes.
+
+### After a green build
+
+Static pages work immediately, but every `/api/*` route returns 500 until:
+
+1. **Railway Public Access** is enabled on `Bounties Prod DB`. Cloudflare
+   cannot resolve `postgres-b1fc.railway.internal` — that is private Railway
+   DNS, and no Worker can reach it, Hyperdrive or not.
+2. `wrangler secret put DATABASE_URL` with the `*.proxy.rlwy.net` connection
+   string for the `bounties_app` role (NOT the superuser).
+
+Rotate the `postgres` superuser password BEFORE enabling public access.
+Railway's own warning is accurate: anyone with the string can connect.
