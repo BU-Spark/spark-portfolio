@@ -1,6 +1,11 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "spark-bounties",
+  // Must match the Cloudflare Workers service EXACTLY. Workers Builds runs
+  // `wrangler deploy`, which refuses when this name differs from the service
+  // it is attached to. atlas/wrangler.int.jsonc <-> spark-portfolio-int is the
+  // pattern that works; "spark-bounties" here against a service called
+  // bounties-site is what broke the build.
+  "name": "bounties-site",
   "compatibility_date": "2026-07-24",
   // Required by `pg`, which reaches for node:net/node:tls. (It was previously
   // required for node:crypto's MD5 — that need went away with Mailchimp, but
