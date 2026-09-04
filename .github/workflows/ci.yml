@@ -61,6 +61,44 @@ jobs:
       - name: Next build
         run: npx next build
 
+  bounties:
+    name: bounties — typecheck, tests, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bounties
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # bounties/.nvmrc, not atlas/.nvmrc: this initiative should not break
+          # because another one bumped its Node. Must stay >= 22.6 — `npm test`
+          # uses `node --experimental-strip-types`, which does not exist before
+          # then and would fail as a syntax error rather than a clear message.
+          node-version-file: bounties/.nvmrc
+          cache: npm
+          cache-dependency-path: bounties/package-lock.json
+
+      - run: npm ci
+
+      # astro check. Also covers the .astro templates, which tsc alone misses.
+      - name: Typecheck
+        run: npm run check
+
+      # No framework: two files of assert-based self-checks covering the Slack
+      # signature verification and the Postgres -> Mailchimp tag mapping. No
+      # network and no database, so they need no secrets.
+      - name: Unit tests
+        run: npm test
+
+      # Needs no env vars: every DB call is inside an SSR route, so nothing
+      # touches Postgres or Mailchimp at build time. If a future page reads the
+      # database while prerendering, THIS is what will fail — and the fix is to
+      # mark that page `prerender = false`, not to give CI a connection string.
+      - name: Astro build
+        run: npm run build
+
   hub:
     name: hub — generated index.html is current
     runs-on: ubuntu-latest
