@@ -76,6 +76,11 @@
   --r: 14px;
   --r-lg: 18px;
 
+  /* ground texture: a dot grid faint enough to be felt, not read */
+  --dot: rgba(22, 25, 28, 0.07);
+  --glow-a: rgba(15, 163, 146, 0.16);
+  --glow-b: rgba(201, 138, 0, 0.12);
+
   --page: 1080px;
   --pad: 40px;
 }
@@ -127,6 +132,10 @@
   --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.4);
   --shadow-gold: 0 4px 16px rgba(0, 0, 0, 0.3);
   --shadow-featured: 0 6px 24px rgba(25, 194, 174, 0.18);
+
+  --dot: rgba(255, 255, 255, 0.06);
+  --glow-a: rgba(25, 194, 174, 0.14);
+  --glow-b: rgba(201, 138, 0, 0.1);
 }
 
 /* ─── reset / base ─── */
@@ -145,6 +154,9 @@ html {
 body {
   margin: 0;
   background: var(--bg);
+  /* the dot grid gives the ground a surface; atlas's plain #f4f5f4 read as empty here */
+  background-image: radial-gradient(var(--dot) 1px, transparent 1.2px);
+  background-size: 22px 22px;
   color: var(--ink);
   font-family: var(--body);
   -webkit-font-smoothing: antialiased;
@@ -1065,6 +1077,98 @@ a.step:hover h3 {
   color: var(--muted);
   line-height: 1.6;
   margin: 0;
+}
+
+/* ── aura: hero glow, eyebrow, stats, standing card, step connectors ─────── */
+.hero-board {
+  position: relative;
+  isolation: isolate;
+  padding-bottom: 28px;
+}
+/* two soft blobs behind the hero — accent and gold, the two brand colours */
+.hero-board::before,
+.hero-board::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+}
+.hero-board::before {
+  width: 520px; height: 320px;
+  right: -60px; top: -90px;
+  background: var(--glow-a);
+}
+.hero-board::after {
+  width: 300px; height: 220px;
+  right: 240px; top: 120px;
+  background: var(--glow-b);
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 14px;
+}
+.hero-stats {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 26px;
+  gap: 36px;
+}
+/* nothing to count and no live builders yet: collapse instead of leaving a gap */
+.hero-stats:not(:has(> div:not([hidden]))) { display: none; }
+.hero-stats b { font-family: var(--display); font-size: 30px; letter-spacing: -0.5px; }
+.hero-stats span { display: block; margin-top: 6px; font-family: var(--mono); letter-spacing: 0.8px; font-weight: 500; color: var(--muted); }
+
+/* the grid always has a standing "more coming" card, so one bounty is never alone */
+.card-open {
+  border: 1.5px dashed var(--pill-border);
+  background: transparent;
+  box-shadow: none;
+  justify-content: center;
+  text-align: left;
+}
+.card-open:hover { border-color: var(--accent); box-shadow: none; background: var(--accent-wash); }
+.card-open .card-open-glyph {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--accent-wash); color: var(--accent-ink);
+  font-family: var(--display); font-weight: 700; font-size: 22px; line-height: 1;
+}
+.card-open h3 { margin-top: 4px; }
+.card-open p { font-size: 13px; color: var(--muted); line-height: 1.55; margin: 0; }
+.card-open .go { color: var(--accent-ink); font-weight: 600; font-size: 13px; }
+
+/* steps: numbered circles joined by a hairline, instead of bare digits */
+.steps { position: relative; }
+.steps::before {
+  content: '';
+  position: absolute;
+  left: 18px; right: 18px; top: 18px;
+  border-top: 1px dashed var(--pill-border);
+  z-index: 0;
+}
+.step { position: relative; z-index: 1; }
+.step .n {
+  width: 36px; height: 36px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--card);
+  border: 1px solid var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--mono); font-size: 14px; font-weight: 500;
+  box-shadow: 0 0 0 6px var(--bg);
+}
+.card:hover { box-shadow: var(--shadow-lift), 0 0 0 3px var(--accent-wash); }
+
+@media (max-width: 720px) {
+  .hero-board::before { width: 320px; height: 220px; right: -120px; }
+  .hero-board::after { display: none; }
+  .steps::before { display: none; }
+  .hero-stats { gap: 22px; flex-wrap: wrap; }
 }
 
 /* ─── footer ─── */
