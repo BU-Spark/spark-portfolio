@@ -1,0 +1,284 @@
+---
+import { getCollection } from 'astro:content';
+import { marked } from 'marked';
+import Site from '../../layouts/Site.astro';
+import { deadlineDetail, effectiveStatus } from '../../lib/deadline';
+import { track } from '../../lib/tracks';
+import { isPubliclyVisible } from '../../lib/spine';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('bounties');
+  // Non-public bounties get no page at all — the surest way not to leak one.
+  return entries
+    .filter((e) => isPubliclyVisible(e.data.visibility))
+    .map((e) => ({
+      params: { slug: e.slug },
+      props: {
+        b: {
+          slug: e.slug,
+          title: e.data.title,
+          prize: e.data.prize,
+          difficulty: e.data.difficulty,
+          deadline: e.data.deadline,
+          tags: e.data.tags,
+          status: e.data.status,
+          trackId: e.data.track,
+          sponsor: e.data.sponsor,
+          requirements: e.data.requirements,
+          briefHtml: marked.parse(e.body || '') as string,
+          briefText: e.body || '',
+          docLink: e.data.docLink,
+          repoLink: e.data.repoLink,
+          instructionsLink: e.data.instructionsLink,
+        },
+      },
+    }));
+}
+
+const { b } = Astro.props;
+const t = track(b.trackId);
+const status = effectiveStatus(b.status, b.deadline);
+const due = deadlineDetail(b.deadline);
+const sponsor = b.sponsor || t.sponsor;
+/** Where a link actually goes — "docs.google.com" beats a bare label. */
+function host(u: string | undefined): string {
+  try {
+    return new URL(u!).hostname.replace(/^www\./, '');
+  } catch {
+    return 'external link';
+  }
+}
+
+const ICONS = {
+  doc: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  repo: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  guide:
+    '<path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><polyline points="9 14 11 16 15 12"/>',
+} as const;
+
+const links = [
+  { label: 'Brief doc', hint: 'Full spec and scope', icon: 'doc', href: b.docLink },
+  { label: 'Repository', hint: 'Starter code and issues', icon: 'repo', href: b.repoLink },
+  {
+    label: 'How to submit',
+    hint: 'Submission and payout steps',
+    icon: 'guide',
+    href: b.instructionsLink,
+  },
+].filter((l) => !!l.href);
+---
+
+<Site nav="board" title={`${b.title} — Spark! Bounties`} description={b.briefText.slice(0, 155)}>
+  <nav class="crumb"><a href="/">Board</a> / {b.title}</nav>
+
+  <div class="detail">
+    <div class="detail-main">
+      <div>
+        <div class="badge-row">
+          <span class={`badge badge-${t.variant}`}>{t.label}</span>
+          <span class={`badge ${status === 'open' ? 'badge-open' : 'badge-closed'}`}>{status}</span>
+          <span class={`badge ${b.difficulty === 'Advanced' ? 'badge-advanced' : 'badge-neutral'}`}>
+            {b.difficulty}
+          </span>
+        </div>
+        <h1>{b.title}</h1>
+      </div>
+
+      <div>
+        <div class="label">The brief</div>
+        <div class="prose" set:html={b.briefHtml} />
+      </div>
+
+      {
+        b.requirements && b.requirements.length > 0 && (
+          <div class="panel">
+            <div class="label">Requirements</div>
+            <div class="reqs">
+              {b.requirements.map((r) => (
+                <div>
+                  <span class={`mark${r.done ? ' done' : ''}`}>{r.done ? '✓' : '○'}</span>
+                  <span>{r.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      }
+
+      {
+        b.tags.length > 0 && (
+          <div class="chips">
+            {b.tags.map((tag) => (
+              <span class="chip">{tag}</span>
+            ))}
+          </div>
+        )
+      }
+    </div>
+
+    <aside class="side">
+      <div class="prize-card">
+        <div class="cap">PRIZE</div>
+        <div class="amt">${b.prize}</div>
+        <div class="row">
+          <span>Deadline</span>
+          <b class={due.urgent ? 'urgent' : ''} style="font-weight:700">{due.text}</b>
+        </div>
+
+        {
+          status === 'open' ? (
+            <div class="actions">
+              <button class="btn" data-type="interested">I'm interested</button>
+              <button class="btn btn-outline" data-type="looking-for-team">
+                Looking for teammates
+              </button>
+            </div>
+          ) : (
+            <div class="actions">
+              <button class="btn" disabled>Closed for submissions</button>
+            </div>
+          )
+        }
+
+        <form class="form" id="joinForm" hidden data-slug={b.slug} data-title={b.title}>
+          <div class="two">
+            <input type="text" name="first_name" placeholder="First name" autocomplete="given-name" required />
+            <input type="text" name="last_name" placeholder="Last name" autocomplete="family-name" required />
+          </div>
+          <input type="email" name="email" placeholder="BU email" autocomplete="email" required />
+          <fieldset id="modeFields">
+            <label><input type="radio" name="working_mode" value="solo" checked /> Solo</label>
+            <label><input type="radio" name="working_mode" value="team" /> With a team</label>
+          </fieldset>
+          <button class="btn" type="submit" id="joinSubmit">Confirm</button>
+          <p class="msg" id="joinMsg" hidden />
+        </form>
+      </div>
+
+      <div class="stats">
+        <div><span>Interested</span><b id="cInterested">…</b></div>
+        <div><span>Looking for team</span><b id="cTeam">…</b></div>
+        {sponsor && <div><span>Sponsor</span><b class="accent">{sponsor}</b></div>}
+      </div>
+
+      {
+        links.length > 0 && (
+          <div class="res">
+            <div class="res-head">
+              <span>Resources</span>
+              <span class="n">{links.length}</span>
+            </div>
+            {links.map((l) => (
+              <a class="res-item" href={l.href} target="_blank" rel="noopener">
+                <span class="res-ico">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                    set:html={ICONS[l.icon as keyof typeof ICONS]}
+                  />
+                </span>
+                <span class="res-txt">
+                  <b>{l.label}</b>
+                  <span>{host(l.href)}</span>
+                </span>
+                {/* diagonal arrow signals "opens in a new tab" */}
+                <svg
+                  class="res-go"
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <line x1="7" y1="17" x2="17" y2="7" />
+                  <polyline points="8 7 17 7 17 16" />
+                </svg>
+              </a>
+            ))}
+          </div>
+        )
+      }
+    </aside>
+  </div>
+
+  <script>
+    const form = document.getElementById('joinForm') as HTMLFormElement | null;
+    const msg = document.getElementById('joinMsg');
+    const modeFields = document.getElementById('modeFields');
+    const submit = document.getElementById('joinSubmit') as HTMLButtonElement | null;
+    let type = 'interested';
+
+    // Both CTAs open the same form; the button clicked decides which tag is set.
+    for (const btn of document.querySelectorAll<HTMLElement>('.actions button[data-type]')) {
+      btn.addEventListener('click', () => {
+        type = btn.dataset.type || 'interested';
+        // "looking for teammates" already implies a team, so hide the mode picker
+        if (modeFields) modeFields.hidden = type === 'looking-for-team';
+        if (form) form.hidden = false;
+        form?.querySelector<HTMLInputElement>('input')?.focus();
+      });
+    }
+
+    function show(text: string, ok: boolean) {
+      if (!msg) return;
+      msg.textContent = text;
+      msg.className = `msg ${ok ? 'ok' : 'err'}`;
+      msg.hidden = false;
+    }
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!submit) return;
+      const data = new FormData(form);
+      submit.disabled = true;
+      submit.textContent = 'Sending…';
+      try {
+        const res = await fetch('/api/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name: data.get('first_name'),
+            last_name: data.get('last_name'),
+            email: data.get('email'),
+            bounty_slug: form.dataset.slug,
+            type,
+            working_mode: type === 'looking-for-team' ? 'team' : data.get('working_mode'),
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+        show("You're in. The brief and repo are linked under Resources.", true);
+        submit.textContent = 'Registered ✓';
+        loadCounts();
+      } catch (err) {
+        show(`Couldn't register: ${err instanceof Error ? err.message : 'unknown error'}`, false);
+        submit.disabled = false;
+        submit.textContent = 'Confirm';
+      }
+    });
+
+    async function loadCounts() {
+      const slug = form?.dataset.slug;
+      if (!slug) return; // closed bounties still render the form element
+      try {
+        const res = await fetch(`/api/bounty-counts?slug=${encodeURIComponent(slug)}`);
+        const c = await res.json();
+        const a = document.getElementById('cInterested');
+        const b = document.getElementById('cTeam');
+        if (a) a.textContent = String(c.interested ?? 0);
+        if (b) b.textContent = String(c.lookingForTeam ?? 0);
+      } catch {
+        /* counts are decorative — leave the placeholder */
+      }
+    }
+    loadCounts();
+  </script>
+</Site>

@@ -46,7 +46,10 @@ export const GROUPS = [
   {
     title: "For Students",
     links: [
-      { title: "The Bounty Board", desc: "Paid challenges — incl. the HackBU × BU IS&T track", icon: "coin", href: "#", featured: true },
+      // ../bounties/ in this monorepo, live (once Cloudflare routes it) at
+      // bounties.buspark.io. hackbu.buspark.io points at the same app's
+      // /tracks/hackbu page — see bounties/README.md § Hostnames.
+      { title: "The Bounty Board", desc: "Paid challenges — incl. the HackBU × BU IS&T track", icon: "coin", href: "https://bounties.buspark.io", featured: true },
       { title: "Work With Us", desc: "Student jobs: engineers, designers, PMs, ambassadors", icon: "userPlus", href: "#" },
       { title: "Events & Workshops", desc: "Innovation Hours, demo nights, semester kickoffs", icon: "calendar", href: "#" },
     ],

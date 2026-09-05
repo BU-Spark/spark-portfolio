@@ -1,0 +1,86 @@
+---
+// SSR so live Eventbrite data can be fetched on the server — no client-side
+// refetch and no duplicated row markup in JS.
+export const prerender = false;
+
+import Site from '../layouts/Site.astro';
+import staticEvents from '../lib/events-fallback.json';
+
+type Evt = { title: string; when: string; where: string; url?: string };
+
+let events: Evt[] = staticEvents as Evt[];
+// `live` gates anything that assumes chronological, currently-scheduled data.
+// The bundled fallback has no year and may be months stale, so it gets no
+// "next up" treatment.
+let live = false;
+try {
+  const res = await fetch(new URL('/api/events', Astro.url));
+  const data = await res.json();
+  if (Array.isArray(data.events) && data.events.length > 0) {
+    events = data.events;
+    live = true;
+  }
+} catch {
+  // fall through to the bundled events.json
+}
+
+const MONTHS = /^(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
+
+/**
+ * `when` arrives pre-formatted from /api/events ("Wed, Aug 12, 4:00 PM") or as a
+ * bare date from events.json ("March 18"). Split it into the big date line and
+ * the day/time line rather than reformatting a string we can't reliably parse.
+ */
+function splitWhen(when: string): { date: string; sub: string } {
+  const parts = when.split(', ').map((p) => p.trim()).filter(Boolean);
+  // "March 18" at 26px/800 overflows the date column — abbreviate to "Mar 18",
+  // which is also what the design specifies.
+  const short = (s: string) => s.replace(MONTHS, (m) => m.slice(0, 3));
+  if (parts.length >= 3)
+    return { date: short(parts[1]), sub: `${parts[0]} · ${parts.slice(2).join(' ')}` };
+  if (parts.length === 2) return { date: short(parts[1]), sub: parts[0] };
+  return { date: short(when), sub: '' };
+}
+---
+
+<Site
+  nav="events"
+  title="Events — Spark! Bounties"
+  description="Build time, demo nights, and kickoffs — all open to any BU student."
+>
+  <section class="hero">
+    <h1>Upcoming events</h1>
+    <p>Build time, demo nights, and kickoffs — all open to any BU student.</p>
+  </section>
+
+  <div class="rows">
+    {
+      events.map((e, i) => {
+        const w = splitWhen(e.when);
+        const next = live && i === 0;
+        return (
+          <div class={`evt${next ? ' next' : ''}`}>
+            <div>
+              <div class="date">{w.date}</div>
+              {w.sub && <div class="sub">{w.sub}</div>}
+            </div>
+            <div>
+              <h3>{e.title}{next && <span class="chip-week">NEXT UP</span>}</h3>
+            </div>
+            <span class="where">{e.where}</span>
+            {
+              e.url ? (
+                <a class={`btn rsvp${next ? '' : ' btn-outline'}`} href={e.url} target="_blank" rel="noopener">
+                  RSVP
+                </a>
+              ) : (
+                <span />
+              )
+            }
+          </div>
+        );
+      })
+    }
+    {events.length === 0 && <p class="empty">No events scheduled right now — check Discord.</p>}
+  </div>
+</Site>

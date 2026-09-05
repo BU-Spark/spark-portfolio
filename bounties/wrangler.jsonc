@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Must match the Cloudflare Workers service EXACTLY. Workers Builds runs
+  // `wrangler deploy`, which refuses when this name differs from the service
+  // it is attached to. atlas/wrangler.int.jsonc <-> spark-portfolio-int is the
+  // pattern that works; "spark-bounties" here against a service called
+  // bounties-site is what broke the build.
+  "name": "bounties-site",
+  "compatibility_date": "2026-07-24",
+  // Required by `pg`, which reaches for node:net/node:tls. (It was previously
+  // required for node:crypto's MD5 — that need went away with Mailchimp, but
+  // the Postgres driver needs the flag regardless.) atlas sets the same flag.
+  "compatibility_flags": ["nodejs_compat"],
+  // Wrangler runs this itself before bundling, so `wrangler versions upload`
+  // and `wrangler deploy` cannot be invoked against a dist/ that was never
+  // generated. Workers Builds has a "Build command" field in the dashboard that
+  // does the same job, but it is invisible to this repo and was twice left
+  // empty — producing `The entry-point file at "dist/_worker.js/index.js" was
+  // not found`, which reads like a code fault and is not one. Declaring it here
+  // makes the deploy self-contained and reviewable.
+  "build": {
+    "command": "npm run build"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "main": "./dist/_worker.js/index.js",
+  // NO HYPERDRIVE BINDING — deliberately.
+  //
+  // Hyperdrive is an optimisation, not a requirement. src/lib/db.ts resolves
+  // the connection string as "HYPERDRIVE binding if bound, else DATABASE_URL",
+  // so the app runs either way with zero code change. Creating a Hyperdrive
+  // config needs Cloudflare account access, which would otherwise block anyone
+  // without it from deploying at all — and a placeholder `id` here is worse
+  // than nothing: wrangler hard-fails the deploy on an unknown Hyperdrive ID.
+  //
+  // So the deployable config is a DATABASE_URL secret:
+  //   wrangler secret put DATABASE_URL
+  // pointing at Railway's PUBLIC proxy host (*.proxy.rlwy.net). NOT
+  // *.railway.internal, which resolves only inside Railway's network — no
+  // Worker, with or without Hyperdrive, can reach that host.
+  //
+  // Trade-off: without Hyperdrive every request opens its own Postgres
+  // connection. Fine at this traffic; the ceiling is Railway's max_connections
+  // (~100 by default), so if the board ever gets busy, add Hyperdrive:
+  //   wrangler hyperdrive create spark-bounties --connection-string="postgresql://..."
+  // then restore the block below with the returned id. Nothing else changes.
+  //
+  // "hyperdrive": [
+  //   {
+  //     "binding": "HYPERDRIVE",
+  //     "id": "<id from `wrangler hyperdrive create`>",
+  //     // Required for DEPLOYS too, not just local dev, despite the name:
+  //     // wrangler calls getPlatformProxy() to read the env, which spins up
+  //     // miniflare, and miniflare cannot use a real Hyperdrive config.
+  //     "localConnectionString": "postgresql://placeholder:placeholder@127.0.0.1:5432/unused"
+  //   }
+  // ],
+  // Secrets are NOT set here — use `wrangler secret put`:
+  //   DATABASE_URL           (required; see the note above)
+  //   EVENTBRITE_TOKEN
+  //   SLACK_SIGNING_SECRET   (only if /bounty-signups is in use)
+  // See README.md § "Environment".
+  "observability": {
+    "enabled": true
+  }
+}
