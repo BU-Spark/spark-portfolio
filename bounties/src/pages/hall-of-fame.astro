@@ -87,12 +87,41 @@ const total = list.reduce((sum, i) => sum + i.prize, 0);
   title="Hall of Fame — Spark! Bounties"
   description="Every completed bounty and the builder behind it. Names are permanent."
 >
-  <section class="hero">
-    <h1>They shipped. <em class="gold">They claimed.</em></h1>
-    <p>
-      Every completed bounty and the builder behind it. Names are permanent.
-      {total > 0 && <> ${total.toLocaleString('en-US')} paid out so far.</>}
-    </p>
+  <section class="hero hero-hof">
+    <div>
+      <h1>They shipped. <em class="gold">They claimed.</em></h1>
+      <p>
+        Every completed bounty and the builder behind it. Names are permanent.
+        {total > 0 && <> ${total.toLocaleString('en-US')} paid out so far.</>}
+      </p>
+    </div>
+    <!-- decorative: the heading already says what this page is -->
+    <svg class="trophy" viewBox="0 0 160 200" aria-hidden="true">
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#f3d27a" />
+          <stop offset=".55" stop-color="var(--gold)" />
+          <stop offset="1" stop-color="var(--gold-ink)" />
+        </linearGradient>
+        <linearGradient id="ts" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#fff" stop-opacity=".55" />
+          <stop offset="1" stop-color="#fff" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <!-- handles -->
+      <path d="M30 40h-14a10 10 0 0 0-10 10c0 26 16 44 38 50" fill="none" stroke="url(#tg)" stroke-width="10" stroke-linecap="round" />
+      <path d="M130 40h14a10 10 0 0 1 10 10c0 26-16 44-38 50" fill="none" stroke="url(#tg)" stroke-width="10" stroke-linecap="round" />
+      <!-- cup -->
+      <path d="M30 22h100v40c0 34-22 60-50 60S30 96 30 62Z" fill="url(#tg)" />
+      <path d="M40 30h80v30c0 28-18 50-40 50S40 88 40 60Z" fill="url(#ts)" />
+      <!-- stem + base -->
+      <rect x="72" y="120" width="16" height="26" rx="4" fill="url(#tg)" />
+      <path d="M50 150h60a8 8 0 0 1 8 8v12H42v-12a8 8 0 0 1 8-8Z" fill="url(#tg)" />
+      <rect x="36" y="170" width="88" height="14" rx="5" fill="var(--gold-ink)" />
+      <!-- the Spark! bang, cut into the cup -->
+      <rect x="75" y="42" width="10" height="34" rx="5" fill="var(--bg)" />
+      <circle cx="80" cy="90" r="6" fill="var(--bg)" />
+    </svg>
   </section>
 
   <div class="grid-3" style="padding-top:32px">
@@ -102,7 +131,10 @@ const total = list.reduce((sum, i) => sum + i.prize, 0);
         return (
           <div class="hof">
             <div class="hof-top">
-              <span class="inducted">★ INDUCTED · {i.term}</span>
+              <span class="inducted">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h10v3.5C13 9 10.8 11 8 11S3 9 3 5.5Zm-2 1h2v3H2.5A1.5 1.5 0 0 1 1 4.5Zm12 0h2v1.5A1.5 1.5 0 0 1 13.5 6H13ZM7 11h2v2h2.5v1.5H4.5V13H7Z" /></svg>
+                INDUCTED · {i.term}
+              </span>
               <span class={`badge badge-${t.variant}`} style="font-size:10px;padding:3px 8px">
                 {t.label}
               </span>
@@ -127,6 +159,7 @@ const total = list.reduce((sum, i) => sum + i.prize, 0);
     }
 
     <div class="hof-open">
+      <svg class="ghost" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2h10v3.5C13 9 10.8 11 8 11S3 9 3 5.5Zm-2 1h2v3H2.5A1.5 1.5 0 0 1 1 4.5Zm12 0h2v1.5A1.5 1.5 0 0 1 13.5 6H13ZM7 11h2v2h2.5v1.5H4.5V13H7Z" /></svg>
       <div class="small">This spot is open.</div>
       <div class="big">Your name goes here</div>
       <a class="btn btn-inline" href="/">Browse open bounties →</a>
