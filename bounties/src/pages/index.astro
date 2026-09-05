@@ -28,6 +28,9 @@ const bounties = entries
     if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
     return a.deadline.localeCompare(b.deadline);
   });
+
+const openCount = bounties.filter((b) => b.status === 'open').length;
+const openPrize = bounties.filter((b) => b.status === 'open').reduce((n, b) => n + b.prize, 0);
 ---
 
 <Site
@@ -35,12 +38,28 @@ const bounties = entries
   title="Spark! Bounties — ship real code, get paid"
   description="Open bounties from BU Spark! and partners. HackBU bounties run with BU IS&T and touch real campus systems."
 >
-  <section class="hero">
+  <section class="hero hero-board">
+    <div class="eyebrow">BU Spark! · Open bounty board</div>
     <h1>Ship real code. <em>Get paid.</em></h1>
     <p>
       Open challenges from BU Spark! and partners. HackBU bounties run with BU IS&amp;T and touch
       real campus systems.
     </p>
+    <!--
+      Numbers only when there is something to count. "0 open · $0" is true
+      between waves but reads as a dead site; the standing card in the grid
+      already says the next wave is coming. Builders fills from
+      /api/bounty-counts and stays hidden while the API reports degraded.
+    -->
+    <div class="stats-row hero-stats" aria-label="Board at a glance">
+      {openCount > 0 && (
+        <>
+          <div><b>{openCount}</b><span>open {openCount === 1 ? 'bounty' : 'bounties'}</span></div>
+          <div><b>${openPrize.toLocaleString('en-US')}</b><span>on the board</span></div>
+        </>
+      )}
+      <div id="stat-builders" hidden><b>0</b><span>builders signed up</span></div>
+    </div>
   </section>
 
   <div class="filters">
@@ -85,6 +104,12 @@ const bounties = entries
         );
       })
     }
+    <a class="card card-open" href="https://discord.gg/buspark" target="_blank" rel="noopener" data-card-static>
+      <span class="card-open-glyph" aria-hidden="true">+</span>
+      <h3>More on the way</h3>
+      <p>Bounties open in waves through the semester. Hear about the next one first on Discord.</p>
+      <span class="go">Join Discord →</span>
+    </a>
     <p class="empty" id="empty" hidden>No bounties match that filter.</p>
   </div>
 
@@ -118,6 +143,25 @@ const bounties = entries
   </section>
 
   <script>
+    // "builders signed up" — live, summed across bounties. Hidden unless the
+    // API is healthy AND the number is non-zero: an honest zero reads as a
+    // dead site, and `degraded` means the number is not real.
+    fetch('/api/bounty-counts')
+      .then((r) => r.json())
+      .then((all: Record<string, { interested?: number; lookingForTeam?: number }> & { degraded?: boolean }) => {
+        if (all.degraded) return;
+        const n = Object.values(all).reduce(
+          (sum, c) => sum + (typeof c === 'object' ? (c.interested ?? 0) + (c.lookingForTeam ?? 0) : 0),
+          0
+        );
+        const el = document.getElementById('stat-builders');
+        if (el && n > 0) {
+          el.querySelector('b')!.textContent = String(n);
+          el.hidden = false;
+        }
+      })
+      .catch(() => {});
+
     const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-card]'));
     const pills = Array.from(document.querySelectorAll<HTMLElement>('.pill[data-track]'));
     const search = document.getElementById('search') as HTMLInputElement | null;
