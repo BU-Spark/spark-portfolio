@@ -10,6 +10,7 @@ import {
   parseTags,
 } from '../../../lib/mailchimp';
 import { rateLimit, getClientIp } from '../../../lib/rate-limit';
+import { requireAdmin, ADMIN_COOKIE } from '../../../lib/admin';
 
 /**
  * Make Mailchimp match Postgres.
@@ -40,14 +41,12 @@ import { rateLimit, getClientIp } from '../../../lib/rate-limit';
  *   curl -X POST https://bounties.buspark.io/api/mailchimp/reconcile \
  *        -H "Authorization: Bearer $ADMIN_KEY"
  */
-export const POST: APIRoute = async ({ request, url, locals }) => {
+export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
+  const denied = requireAdmin(request, locals, cookies.get(ADMIN_COOKIE)?.value);
+  if (denied) return denied;
+
   const rl = rateLimit(getClientIp(request), { name: 'reconcile', limit: 3, windowSec: 300 });
   if (!rl.allowed) return json({ error: 'Rate limited' }, 429);
-
-  const env = (locals as { runtime?: { env?: Record<string, string> } })?.runtime?.env;
-  const adminKey = env?.ADMIN_KEY ?? import.meta.env.ADMIN_KEY;
-  const provided = (request.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!adminKey || provided !== adminKey) return json({ error: 'Unauthorized' }, 401);
 
   const mc = resolveMailchimpEnv(locals);
   if (!mc) return json({ error: 'Mailchimp is not configured' }, 503);

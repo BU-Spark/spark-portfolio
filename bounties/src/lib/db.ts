@@ -14,15 +14,23 @@
 import { Client } from 'pg';
 
 type HyperdriveBinding = { connectionString?: string };
-type RuntimeLocals = { runtime?: { env?: { HYPERDRIVE?: HyperdriveBinding } } };
+type RuntimeLocals = {
+  runtime?: { env?: { HYPERDRIVE?: HyperdriveBinding; DATABASE_URL?: string } };
+};
 
 function resolveConnectionString(locals?: unknown): string {
-  const hyperdrive = (locals as RuntimeLocals | undefined)?.runtime?.env?.HYPERDRIVE
-    ?.connectionString;
+  const runtimeEnv = (locals as RuntimeLocals | undefined)?.runtime?.env;
+
+  const hyperdrive = runtimeEnv?.HYPERDRIVE?.connectionString;
   if (hyperdrive) return hyperdrive;
 
   const direct =
-    import.meta.env.DATABASE_URL ??
+    // `wrangler secret put DATABASE_URL` and .dev.vars BOTH land here, not in
+    // import.meta.env. Omitting this was silent in every local test that used
+    // a shell variable, and would have 500'd every API route in production
+    // with the secret correctly set.
+    runtimeEnv?.DATABASE_URL ??
+    (import.meta as { env?: Record<string, string | undefined> }).env?.DATABASE_URL ??
     (typeof process !== 'undefined' ? process.env?.DATABASE_URL : undefined);
   if (!direct) {
     throw new Error(
@@ -209,4 +217,82 @@ export async function teamIdFor(
     [opts.bountySlug, opts.email]
   );
   return rows[0]?.team_id ?? null;
+}
+
+/** Does anyone hold this team id on this bounty? Validates a join request. */
+export async function teamExists(
+  db: Client,
+  opts: { bountySlug: string; teamId: string }
+): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM bounty_interest WHERE bounty_slug = $1 AND team_id = $2 LIMIT 1`,
+    [opts.bountySlug, opts.teamId]
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Put people on a team, creating their interest row if they had none.
+ *
+ * The Mailchimp version had to deactivate every OTHER `team-group:<slug>:*`
+ * tag by hand, because tags are independent booleans and nothing stopped a
+ * member belonging to two teams at once. Here team_id is a single column
+ * under UNIQUE (bounty_slug, person_id), so one team per person per bounty is
+ * structural — there is nothing to clean up.
+ *
+ * Returns the emails that were actually placed; an unknown email is reported
+ * rather than silently skipped, since the caller is an admin fixing rosters.
+ */
+export async function assignTeam(
+  db: Client,
+  opts: { bountySlug: string; emails: string[]; teamId: string }
+): Promise<{ placed: string[]; unknown: string[] }> {
+  const placed: string[] = [];
+  const unknown: string[] = [];
+
+  for (const raw of opts.emails) {
+    const email = raw.trim().toLowerCase();
+    const { rows } = await db.query<{ id: string }>(
+      `SELECT id FROM person WHERE email = $1`,
+      [email]
+    );
+    if (rows.length === 0) {
+      unknown.push(email);
+      continue;
+    }
+    await db.query(
+      `INSERT INTO bounty_interest (bounty_slug, person_id, intent, working_mode, team_id)
+            VALUES ($1, $2, 'interested', 'team', $3)
+       ON CONFLICT (bounty_slug, person_id) DO UPDATE
+              SET working_mode = 'team',
+                  team_id = EXCLUDED.team_id,
+                  updated_at = now()`,
+      [opts.bountySlug, rows[0].id, opts.teamId]
+    );
+    placed.push(email);
+  }
+  return { placed, unknown };
+}
+
+/**
+ * Take someone off their team for one bounty, keeping their interest.
+ *
+ * Working mode drops back to solo: being on no team IS working solo, and
+ * leaving working_mode='team' with a null team_id would be a state the UI
+ * cannot render honestly.
+ */
+export async function clearTeam(
+  db: Client,
+  opts: { bountySlug: string; email: string }
+): Promise<number> {
+  const { rowCount } = await db.query(
+    `UPDATE bounty_interest bi
+        SET team_id = NULL, working_mode = 'solo', updated_at = now()
+       FROM person p
+      WHERE p.id = bi.person_id
+        AND bi.bounty_slug = $1
+        AND p.email = lower($2)`,
+    [opts.bountySlug, opts.email]
+  );
+  return rowCount ?? 0;
 }
