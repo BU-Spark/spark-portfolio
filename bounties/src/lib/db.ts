@@ -296,3 +296,95 @@ export async function clearTeam(
   );
   return rowCount ?? 0;
 }
+
+/** One row per (bounty, person) with delivery state — the dashboard's feed. */
+export interface RosterFull extends RosterRow {
+  bounty_slug: string;
+  team_id: string | null;
+  joined_at: string;
+  submitted_at: string | null;
+  completed_at: string | null;
+  payout_cents: number | null;
+  submission_url: string | null;
+}
+
+export async function fullRoster(db: Client): Promise<RosterFull[]> {
+  const { rows } = await db.query<RosterFull>(
+    `SELECT * FROM bounty_roster ORDER BY bounty_slug, last_name, first_name`
+  );
+  return rows;
+}
+
+/**
+ * Declare people as having delivered a bounty.
+ *
+ * Sets completed_at (and submitted_at if it was never recorded) in the SAME
+ * statement as payout_cents, so the `paid implies completed` CHECK is
+ * satisfied atomically. payoutCents / submissionUrl of undefined leave the
+ * existing value alone rather than clearing it.
+ */
+export async function markCompleted(
+  db: Client,
+  opts: { bountySlug: string; emails: string[]; payoutCents?: number; submissionUrl?: string }
+): Promise<{ marked: string[]; unknown: string[] }> {
+  const marked: string[] = [];
+  const unknown: string[] = [];
+  for (const raw of opts.emails) {
+    const email = raw.trim().toLowerCase();
+    const { rows } = await db.query<{ email: string }>(
+      `UPDATE bounty_interest bi
+          SET completed_at   = COALESCE(bi.completed_at, now()),
+              submitted_at   = COALESCE(bi.submitted_at, now()),
+              payout_cents   = COALESCE($3, bi.payout_cents),
+              submission_url = COALESCE($4, bi.submission_url),
+              updated_at     = now()
+         FROM person p
+        WHERE p.id = bi.person_id AND bi.bounty_slug = $1 AND p.email = $2
+    RETURNING p.email`,
+      [opts.bountySlug, email, opts.payoutCents ?? null, opts.submissionUrl ?? null]
+    );
+    (rows.length ? marked : unknown).push(email);
+  }
+  return { marked, unknown };
+}
+
+/** Undo a declaration. Clears payout too — the CHECK forbids paid-but-not-done. */
+export async function clearCompleted(
+  db: Client,
+  opts: { bountySlug: string; emails: string[] }
+): Promise<number> {
+  const { rowCount } = await db.query(
+    `UPDATE bounty_interest bi
+        SET completed_at = NULL, payout_cents = NULL, submission_url = NULL, updated_at = now()
+       FROM person p
+      WHERE p.id = bi.person_id AND bi.bounty_slug = $1
+        AND p.email = ANY($2::text[])`,
+    [opts.bountySlug, opts.emails.map((e) => e.trim().toLowerCase())]
+  );
+  return rowCount ?? 0;
+}
+
+export interface HallOfFameRow {
+  bounty_slug: string;
+  /** "Ada Lovelace, Grace Hopper" — every person marked complete on the bounty */
+  names: string;
+  submission_url: string | null;
+  completed_at: string;
+  payout_cents: number;
+}
+
+/** One row per completed bounty, for the public Hall of Fame. */
+export async function hallOfFame(db: Client): Promise<HallOfFameRow[]> {
+  const { rows } = await db.query<HallOfFameRow>(
+    `SELECT bounty_slug,
+            string_agg(first_name || ' ' || last_name, ', ' ORDER BY last_name, first_name) AS names,
+            max(submission_url)              AS submission_url,
+            max(completed_at)::text          AS completed_at,
+            coalesce(sum(payout_cents), 0)::int AS payout_cents
+       FROM bounty_roster
+      WHERE completed_at IS NOT NULL
+      GROUP BY bounty_slug
+      ORDER BY max(completed_at) DESC`
+  );
+  return rows;
+}

@@ -26,7 +26,9 @@ export const GET: APIRoute = async ({ url, locals }) => {
   } catch (err) {
     console.error('Bounty counts API error:', err instanceof Error ? err.message : String(err));
     // Counts are decorative — fail soft so a DB blip doesn't break the page.
-    return json(slug ? { interested: 0, lookingForTeam: 0 } : {});
+    // But flag it: without `degraded`, an unreachable database is
+    // indistinguishable from an empty one, which hid a dead deploy once.
+    return json(slug ? { interested: 0, lookingForTeam: 0, degraded: true } : { degraded: true });
   }
 };
 

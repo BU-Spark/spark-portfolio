@@ -1,36 +1,85 @@
 ---
+// SSR: winners declared through /dashboard live in Postgres and should appear
+// here without a redeploy. Markdown-declared winners (legacy `winner:`
+// frontmatter) still count, so nothing already published disappears.
+export const prerender = false;
+
 import { getCollection } from 'astro:content';
 import Site from '../layouts/Site.astro';
 import { track } from '../lib/tracks';
 import { isPubliclyVisible } from '../lib/spine';
+import { withDb, hallOfFame } from '../lib/db';
 
 const entries = await getCollection('bounties');
 
-/** No `term` field exists on a bounty, so derive it from the deadline. */
-function term(deadline: string): string {
-  const d = new Date(deadline + 'T00:00:00');
+/** No `term` field exists on a bounty, so derive it from a date. */
+function term(iso: string): string {
+  const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);
   if (isNaN(d.getTime())) return '';
   const m = d.getMonth() + 1;
   const season = m <= 5 ? 'SPRING' : m <= 8 ? 'SUMMER' : 'FALL';
   return `${season} '${String(d.getFullYear()).slice(2)}`;
 }
 
-const inductees = entries
-  .filter(
-    (e) =>
-      isPubliclyVisible(e.data.visibility) && e.data.status === 'completed' && e.data.winner
-  )
-  .map((e) => ({
-    title: e.data.title,
-    prize: e.data.prize,
-    winner: e.data.winner as string,
-    submission: e.data.winnerSubmission || '',
-    trackId: e.data.track,
-    term: term(e.data.deadline),
-  }))
-  .sort((a, b) => b.term.localeCompare(a.term) || b.prize - a.prize);
+type Inductee = {
+  slug: string;
+  title: string;
+  prize: number;
+  winner: string;
+  submission: string;
+  trackId: string;
+  term: string;
+};
 
-const total = inductees.reduce((sum, i) => sum + i.prize, 0);
+const inductees = new Map<string, Inductee>();
+
+// 1. Legacy: winners recorded in frontmatter.
+for (const e of entries) {
+  if (isPubliclyVisible(e.data.visibility) && e.data.status === 'completed' && e.data.winner) {
+    inductees.set(e.slug, {
+      slug: e.slug,
+      title: e.data.title,
+      prize: e.data.prize,
+      winner: e.data.winner,
+      submission: e.data.winnerSubmission || '',
+      trackId: e.data.track,
+      term: term(e.data.deadline),
+    });
+  }
+}
+
+// 2. Live: rows marked complete via the dashboard. These win over frontmatter
+// for the same slug — the database is where declarations are made now.
+// Fails soft: a public page should degrade to the legacy list, not to an
+// infrastructure error. The dashboard is where an unreachable DB is loud.
+try {
+  const rows = await withDb(Astro.locals, hallOfFame);
+  for (const r of rows) {
+    const e = entries.find((x) => x.slug === r.bounty_slug);
+    // A bounty hidden from the public board stays hidden here too.
+    if (e && !isPubliclyVisible(e.data.visibility)) continue;
+    inductees.set(r.bounty_slug, {
+      slug: r.bounty_slug,
+      title: e?.data.title ?? r.bounty_slug,
+      // Prefer the actual payout; fall back to the advertised prize.
+      prize: r.payout_cents > 0 ? r.payout_cents / 100 : (e?.data.prize ?? 0),
+      winner: r.names,
+      submission: r.submission_url ?? '',
+      trackId: e?.data.track ?? 'spark',
+      term: term(r.completed_at),
+    });
+  }
+} catch (err) {
+  console.error(
+    'Hall of Fame: database unreachable, showing legacy entries only:',
+    err instanceof Error ? err.message : err
+  );
+}
+
+const list = [...inductees.values()].sort(
+  (a, b) => b.term.localeCompare(a.term) || b.prize - a.prize
+);
+const total = list.reduce((sum, i) => sum + i.prize, 0);
 ---
 
 <Site
@@ -42,13 +91,13 @@ const total = inductees.reduce((sum, i) => sum + i.prize, 0);
     <h1>They shipped. <em class="gold">They claimed.</em></h1>
     <p>
       Every completed bounty and the builder behind it. Names are permanent.
-      {total > 0 && <> ${total} paid out so far.</>}
+      {total > 0 && <> ${total.toLocaleString('en-US')} paid out so far.</>}
     </p>
   </section>
 
   <div class="grid-3" style="padding-top:32px">
     {
-      inductees.map((i) => {
+      list.map((i) => {
         const t = track(i.trackId);
         return (
           <div class="hof">
@@ -70,7 +119,7 @@ const total = inductees.reduce((sum, i) => sum + i.prize, 0);
               ) : (
                 <span>Claimed</span>
               )}
-              <b>${i.prize}</b>
+              <b>${i.prize.toLocaleString('en-US')}</b>
             </div>
           </div>
         );
