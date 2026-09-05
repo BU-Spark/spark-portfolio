@@ -24,6 +24,19 @@ import { rateLimit, getClientIp } from '../../../lib/rate-limit';
  * people Mailchimp thinks are on a bounty but Postgres does not, which is the
  * only destructive direction and therefore opt-in.
  *
+ * DO NOT USE ?prune=1 WHILE hackbu.dev IS STILL ACCEPTING SIGNUPS.
+ *
+ * hackbu.dev writes tags into the SAME audience (3baefe8534) directly from its
+ * own /api/respond, /api/withdraw and /api/team-join, using the same tag
+ * vocabulary. Those signups have no Postgres row here, so prune reads them as
+ * orphans and deactivates them -- silently removing real people from the list
+ * comms mails. Two writers, one audience, and only one of them is mirrored
+ * from this database.
+ *
+ * Prune becomes safe once hackbu.dev is retired and this app is the only
+ * writer. Until then the non-prune path is still useful and still correct: it
+ * only adds and corrects, so it cannot delete a hackbu.dev signup.
+ *
  *   curl -X POST https://bounties.buspark.io/api/mailchimp/reconcile \
  *        -H "Authorization: Bearer $ADMIN_KEY"
  */
