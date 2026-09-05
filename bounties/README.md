@@ -364,3 +364,48 @@ Static pages work immediately, but every `/api/*` route returns 500 until:
 
 Rotate the `postgres` superuser password BEFORE enabling public access.
 Railway's own warning is accurate: anyone with the string can connect.
+
+
+## Admin: `/dashboard`
+
+Cookie session (`spark-admin`, httpOnly, Secure, SameSite=Strict, 4h) unlocked
+with `ADMIN_KEY`. Every login attempt is rate limited BEFORE the key is
+compared -- hackbu.dev only counted failures, which let a correct guess through
+on attempt 50 and made its limiter a message-changer rather than a control.
+
+What it shows, per bounty: teams (by `team_id`), solo signups, people looking
+for teammates, and who delivered. What it does: merge checked people into a
+new team, remove someone from a team, mark checked people as delivered (with a
+per-person payout and an optional https submission URL), undo a delivery, and
+export everything as CSV.
+
+- The CSV is built from an embedded JSON blob, not scraped from the DOM, so it
+  cannot drift from what is displayed. Cells starting with `= + - @` are
+  prefixed with `'` because Excel and Sheets execute those as formulas, and a
+  student can type one as their own name.
+- If Postgres is unreachable the page says so in a red alert. It does NOT show
+  an empty roster, which is what `bounty-counts` used to do -- that endpoint
+  now returns `degraded: true` on fallback for the same reason.
+- Payout defaults to the prize split evenly across the checked people.
+  `payout_cents` is per PERSON (what each one actually receives), so a team of
+  two must not record double the pot.
+
+### Declaring winners
+
+`POST /api/admin/declare-winner` marks people as delivered. This is a
+redesign, not a port: hackbu.dev's version did `fs.writeFileSync` into
+`src/content/*.md` and `src/data/leaderboard.json` at request time, which a
+serverless filesystem does not allow -- its `leaderboard.json` is still 3
+bytes. Here delivery is rows in Postgres, and `/hall-of-fame` is SSR: it shows
+frontmatter-declared winners (legacy) UNION rows with `completed_at`, with the
+database winning for the same slug. Declaring a winner needs no redeploy.
+
+The leaderboard was not ported. It never accumulated a single entry in
+production, so there was no behaviour to preserve.
+
+### Not ported: `/live`
+
+hackbu.dev's `/live` was an "Off Air" livestream placeholder reading a
+`streamUrl` from events JSON. No event has one, and `/events` is where a
+stream link belongs when one exists. It is a hackathon-day page, not a bounty
+board feature.

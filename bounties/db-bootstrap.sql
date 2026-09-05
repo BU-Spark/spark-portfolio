@@ -81,7 +81,11 @@ CREATE INDEX IF NOT EXISTS bounty_interest_team_idx
 ALTER TABLE bounty_interest
   ADD COLUMN IF NOT EXISTS submitted_at  timestamptz,
   ADD COLUMN IF NOT EXISTS completed_at  timestamptz,
-  ADD COLUMN IF NOT EXISTS payout_cents  integer;
+  ADD COLUMN IF NOT EXISTS payout_cents  integer,
+  -- Where the finished work lives (repo, demo, doc). Replaces the
+  -- `winnerSubmission` frontmatter field hackbu.dev's declare-winner wrote to
+  -- disk at request time -- which cannot work on a serverless filesystem.
+  ADD COLUMN IF NOT EXISTS submission_url text;
 
 -- Money in integer cents, never float: 0.1 + 0.2 != 0.3 in binary floating
 -- point, and these figures get summed for reporting.
@@ -111,7 +115,8 @@ SELECT bi.bounty_slug,
        p.email, p.first_name, p.last_name,
        bi.intent, bi.working_mode, bi.team_id,
        bi.created_at AS joined_at,
-       bi.submitted_at, bi.completed_at, bi.payout_cents
+       bi.submitted_at, bi.completed_at, bi.payout_cents,
+       bi.submission_url
 FROM bounty_interest bi
 JOIN person p ON p.id = bi.person_id;
 

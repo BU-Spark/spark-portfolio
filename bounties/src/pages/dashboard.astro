@@ -1,0 +1,399 @@
+---
+export const prerender = false;
+
+import { getCollection } from 'astro:content';
+import Site from '../layouts/Site.astro';
+import { withDb, fullRoster, type RosterFull } from '../lib/db';
+import { rateLimit, getClientIp } from '../lib/rate-limit';
+import { ADMIN_COOKIE, resolveAdminKey } from '../lib/admin';
+
+/**
+ * Admin dashboard: who signed up, who is on which team, who delivered.
+ *
+ * Ported from hackbu.dev, which pulled up to 1000 Mailchimp members per page
+ * view and filtered their tag arrays in JS. Here it is one SELECT on the
+ * bounty_roster view.
+ */
+
+const adminKey = resolveAdminKey(Astro.locals);
+let authorized = false;
+let authError = '';
+
+const cookie = Astro.cookies.get(ADMIN_COOKIE)?.value;
+if (adminKey && cookie === adminKey) authorized = true;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action')?.toString() ?? '';
+
+  if (action === 'logout') {
+    Astro.cookies.delete(ADMIN_COOKIE, { path: '/' });
+    authorized = false;
+  } else {
+    // Limit EVERY attempt, before comparing. hackbu.dev only counted failures
+    // and still let a correct guess through on attempt 50 — which made the
+    // limiter a message-changer, not a brute-force control.
+    const rl = rateLimit(getClientIp(Astro.request), { name: 'login', limit: 5, windowSec: 300 });
+    const provided = form.get('key')?.toString() ?? '';
+    if (!rl.allowed) {
+      authError = 'Too many attempts. Wait five minutes.';
+    } else if (!adminKey) {
+      authError = 'ADMIN_KEY is not configured on this deployment.';
+    } else if (provided === adminKey) {
+      authorized = true;
+      Astro.cookies.set(ADMIN_COOKIE, adminKey, {
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        maxAge: 60 * 60 * 4,
+      });
+    } else {
+      authError = 'Incorrect key.';
+    }
+  }
+}
+
+// ── data ─────────────────────────────────────────────────────────────────────
+type Team = { id: string; members: RosterFull[] };
+type Section = {
+  slug: string;
+  title: string;
+  status: string;
+  prize: number;
+  inContent: boolean;
+  rows: RosterFull[];
+  teams: Team[];
+  solo: RosterFull[];
+  lookingForTeam: RosterFull[];
+  completed: RosterFull[];
+};
+
+let sections: Section[] = [];
+let dbError = '';
+let roster: RosterFull[] = [];
+
+if (authorized) {
+  // Admin sees every bounty, including non-public ones.
+  const entries = await getCollection('bounties');
+  try {
+    roster = await withDb(Astro.locals, fullRoster);
+  } catch (err) {
+    // Loud, not soft: an admin must know the database is unreachable.
+    dbError = err instanceof Error ? err.message : String(err);
+  }
+
+  const bySlug = new Map<string, RosterFull[]>();
+  for (const r of roster) (bySlug.get(r.bounty_slug) ?? bySlug.set(r.bounty_slug, []).get(r.bounty_slug)!).push(r);
+
+  const build = (slug: string, meta?: { title: string; status: string; prize: number }): Section => {
+    const rows = bySlug.get(slug) ?? [];
+    const teamMap = new Map<string, RosterFull[]>();
+    for (const r of rows) if (r.team_id) (teamMap.get(r.team_id) ?? teamMap.set(r.team_id, []).get(r.team_id)!).push(r);
+    return {
+      slug,
+      title: meta?.title ?? slug,
+      status: meta?.status ?? 'unknown',
+      prize: meta?.prize ?? 0,
+      inContent: !!meta,
+      rows,
+      teams: [...teamMap].map(([id, members]) => ({ id, members })),
+      solo: rows.filter((r) => !r.team_id && r.intent === 'interested'),
+      lookingForTeam: rows.filter((r) => r.intent === 'looking_for_team'),
+      completed: rows.filter((r) => r.completed_at),
+    };
+  };
+
+  sections = entries.map((e) => build(e.slug, e.data));
+  // Rows whose slug has no markdown file: a deleted or renamed bounty. Show
+  // them rather than silently orphaning real signups.
+  for (const slug of bySlug.keys()) if (!entries.some((e) => e.slug === slug)) sections.push(build(slug));
+  sections.sort((a, b) => b.rows.length - a.rows.length);
+}
+
+const stats = {
+  bounties: sections.filter((s) => s.inContent).length,
+  signups: roster.length,
+  lookingForTeam: roster.filter((r) => r.intent === 'looking_for_team').length,
+  completed: roster.filter((r) => r.completed_at).length,
+  payout: roster.reduce((n, r) => n + (r.payout_cents ?? 0), 0),
+};
+
+// Data for the client-side CSV export. Built from data, not scraped from the
+// DOM, so the file cannot drift from what is displayed. `<` is escaped so a
+// name containing "</script>" cannot break out of the tag.
+const exportJson = JSON.stringify(
+  roster.map((r) => ({
+    bounty: r.bounty_slug,
+    first: r.first_name,
+    last: r.last_name,
+    email: r.email,
+    intent: r.intent,
+    mode: r.working_mode,
+    team: r.team_id ?? '',
+    completed: r.completed_at ?? '',
+    payout_cents: r.payout_cents ?? '',
+    submission: r.submission_url ?? '',
+  }))
+).replace(/</g, '\\u003c');
+
+const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 0 })}`;
+---
+
+<Site title="Admin — Spark! Bounties">
+  {
+    !authorized ? (
+      <section class="login">
+        <div class="label">Admin</div>
+        <h1>Bounty dashboard</h1>
+        <form method="POST">
+          <input type="password" name="key" placeholder="Admin key" autofocus autocomplete="current-password" required />
+          <button class="btn" type="submit">Sign in</button>
+        </form>
+        {authError && <p class="msg err">{authError}</p>}
+      </section>
+    ) : (
+      <>
+        <div class="dash-head">
+          <div>
+            <div class="label">Admin</div>
+            <h1>Bounty dashboard</h1>
+          </div>
+          <div class="dash-actions">
+            <button class="btn btn-outline" id="export-csv" type="button">Export CSV</button>
+            <form method="POST"><input type="hidden" name="action" value="logout" /><button class="btn btn-outline" type="submit">Log out</button></form>
+          </div>
+        </div>
+
+        {dbError && (
+          <div class="alert">
+            <b>Database unreachable.</b> Everything below is empty because of that, not because nobody signed up.
+            <code>{dbError}</code>
+          </div>
+        )}
+
+        <div class="dash-stats">
+          <div><span>Bounties</span><b>{stats.bounties}</b></div>
+          <div><span>Signups</span><b>{stats.signups}</b></div>
+          <div><span>Looking for team</span><b>{stats.lookingForTeam}</b></div>
+          <div><span>Delivered</span><b>{stats.completed}</b></div>
+          <div><span>Paid out</span><b>{dollars(stats.payout)}</b></div>
+        </div>
+
+        {sections.map((s) => (
+          <section class="bounty-sec" data-slug={s.slug}>
+            <div class="sec-head">
+              <h2>{s.title}</h2>
+              <span class={`badge ${s.status === 'open' ? 'badge-open' : 'badge-closed'}`}>{s.status}</span>
+              {!s.inContent && <span class="badge badge-advanced" title="No markdown file for this slug">orphaned</span>}
+              <span class="n">{s.rows.length} signed up</span>
+            </div>
+
+            {s.rows.length === 0 ? (
+              <p class="empty">No signups yet.</p>
+            ) : (
+              <>
+                <div class="sec-tools">
+                  <button class="btn btn-sm" data-act="merge" type="button" title="Put every checked person on one new team">Merge checked → new team</button>
+                  <button class="btn btn-sm" data-act="win" type="button" title="Mark every checked person as having delivered">Mark checked as delivered</button>
+                  <input class="fld-sm" data-field="payout" type="number" min="0" step="1" placeholder={`payout $ (default ${s.prize})`} />
+                  <input class="fld-sm wide" data-field="url" type="url" placeholder="submission https://… (optional)" />
+                </div>
+
+                {s.completed.length > 0 && (
+                  <div class="grp">
+                    <div class="grp-label ok">Delivered · {s.completed.length}</div>
+                    {s.completed.map((r) => (
+                      <div class="row">
+                        <span class="who">{r.first_name} {r.last_name} <em>{r.email}</em></span>
+                        <span class="meta">{r.payout_cents != null ? dollars(r.payout_cents) : ''} {r.submission_url && <a href={r.submission_url} target="_blank" rel="noopener">submission ↗</a>}</span>
+                        <button class="lnk" data-act="unwin" data-email={r.email} type="button">undo</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {s.teams.map((t) => (
+                  <div class="grp">
+                    <div class="grp-label">Team <code>{t.id}</code> · {t.members.length}</div>
+                    {t.members.map((r) => (
+                      <div class="row">
+                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                        <button class="lnk" data-act="unteam" data-email={r.email} type="button">remove from team</button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+
+                {s.solo.length > 0 && (
+                  <div class="grp">
+                    <div class="grp-label">Solo · {s.solo.length}</div>
+                    {s.solo.map((r) => (
+                      <div class="row">
+                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {s.lookingForTeam.length > 0 && (
+                  <div class="grp">
+                    <div class="grp-label accent">Looking for teammates · {s.lookingForTeam.length}</div>
+                    {s.lookingForTeam.map((r) => (
+                      <div class="row">
+                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        ))}
+
+        <div id="toast" class="toast" hidden></div>
+        <script type="application/json" id="roster-data" set:html={exportJson} />
+      </>
+    )
+  }
+
+  <style>
+    .login { max-width: 380px; margin: 80px auto; display: grid; gap: 14px; }
+    .login form { display: grid; gap: 10px; }
+    .login input { padding: 11px 13px; border: 1px solid var(--pill-border); border-radius: var(--r-xs); font: inherit; background: var(--card); color: var(--ink); }
+    .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+    .dash-actions { display: flex; gap: 8px; }
+    .alert { background: var(--diff-advanced-wash); border: 1px solid var(--diff-advanced); color: var(--ink); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 18px; font-size: 14px; }
+    .alert code { display: block; margin-top: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+    .dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 30px; }
+    .dash-stats > div { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 14px 16px; display: grid; gap: 4px; }
+    .dash-stats span { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+    .dash-stats b { font-family: var(--display); font-size: 26px; }
+    .bounty-sec { background: var(--card); border: 1px solid var(--border); border-radius: var(--r); padding: 18px 20px; margin-bottom: 16px; }
+    .sec-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+    .sec-head h2 { font-family: var(--display); font-size: 20px; margin: 0; }
+    .sec-head .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+    .sec-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 0 14px; border-bottom: 1px solid var(--divider); margin-bottom: 8px; }
+    .btn-sm { padding: 7px 11px; font-size: 12.5px; }
+    .fld-sm { padding: 7px 10px; border: 1px solid var(--pill-border); border-radius: var(--r-xs); font: inherit; font-size: 12.5px; width: 170px; background: var(--card); color: var(--ink); }
+    .fld-sm.wide { width: 260px; }
+    .grp { padding: 8px 0; }
+    .grp-label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; }
+    .grp-label.ok { color: var(--ok-ink); } .grp-label.accent { color: var(--accent-ink); }
+    .grp-label code { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
+    .row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--divider); font-size: 14px; }
+    .row .who { flex: 1; display: flex; gap: 8px; align-items: center; }
+    .row em { font-style: normal; color: var(--muted); font-size: 13px; }
+    .row .meta { font-size: 12.5px; color: var(--muted); display: flex; gap: 10px; }
+    .lnk { background: none; border: 0; color: var(--accent-ink); font: inherit; font-size: 12.5px; cursor: pointer; padding: 0; }
+    .lnk:hover { text-decoration: underline; }
+    .empty { color: var(--muted); font-size: 14px; margin: 0; }
+    .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: var(--r-sm); font-size: 14px; box-shadow: var(--shadow-panel); z-index: 50; }
+  </style>
+
+  <script>
+    const toast = document.getElementById('toast')!;
+    let toastTimer: number | undefined;
+    function show(msg: string, ms = 3200) {
+      toast.textContent = msg;
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => (toast.hidden = true), ms);
+    }
+
+    // Same-origin fetch: the spark-admin cookie rides along automatically, and
+    // lib/admin.ts accepts it in place of a Bearer header.
+    async function post(url: string, body: unknown): Promise<Record<string, unknown>> {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) throw new Error((data.error as string) || `HTTP ${res.status}`);
+      return data;
+    }
+
+    function checked(sec: HTMLElement): string[] {
+      return [...sec.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')].map((c) => c.value);
+    }
+
+    document.querySelectorAll<HTMLElement>('.bounty-sec').forEach((sec) => {
+      const slug = sec.dataset.slug!;
+      const prizeDefault = Number(
+        (sec.querySelector<HTMLInputElement>('[data-field=payout]')?.placeholder.match(/\d+/) ?? ['0'])[0]
+      );
+
+      sec.addEventListener('click', async (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
+        if (!btn) return;
+        const act = btn.dataset.act;
+        try {
+          if (act === 'merge') {
+            const emails = checked(sec);
+            if (emails.length < 2) return show('Check at least two people to form a team.');
+            const r = await post('/api/admin/merge-team', { slug, emails });
+            show(`Team ${r.teamId}: ${(r.placed as string[]).length} placed${(r.unknown as string[]).length ? `, ${(r.unknown as string[]).length} unknown` : ''}`);
+          } else if (act === 'win') {
+            const emails = checked(sec);
+            if (emails.length === 0) return show('Check who delivered first.');
+            const payoutField = sec.querySelector<HTMLInputElement>('[data-field=payout]')!;
+            const urlField = sec.querySelector<HTMLInputElement>('[data-field=url]')!;
+            // payout_cents is PER PERSON — what each one actually receives. The
+            // prize is one pot, so the default splits it evenly; a team of two
+            // must not record double the money. Typing a value overrides per head.
+            const perHead =
+              payoutField.value === ''
+                ? Math.round((prizeDefault * 100) / emails.length) / 100
+                : Number(payoutField.value);
+            if (!Number.isFinite(perHead) || perHead < 0) return show('Payout must be a non-negative number.');
+            const total = perHead * emails.length;
+            if (!confirm(`Mark ${emails.length} as delivered on "${slug}" at $${perHead} each ($${total} total)?`)) return;
+            const dollars = perHead;
+            const r = await post('/api/admin/declare-winner', {
+              slug,
+              emails,
+              // integer cents on the wire; no float leaves this page
+              payoutCents: Math.round(dollars * 100),
+              submissionUrl: urlField.value.trim() || undefined,
+            });
+            show(`Marked ${(r.marked as string[]).length} delivered${(r.unknown as string[]).length ? `, ${(r.unknown as string[]).length} unknown` : ''}`);
+          } else if (act === 'unwin') {
+            if (!confirm(`Undo delivery for ${btn.dataset.email}?`)) return;
+            await post('/api/admin/declare-winner', { slug, emails: [btn.dataset.email], undo: true });
+            show('Undone.');
+          } else if (act === 'unteam') {
+            if (!confirm(`Remove ${btn.dataset.email} from their team?`)) return;
+            await post('/api/admin/remove-from-team', { slug, email: btn.dataset.email });
+            show('Removed from team.');
+          } else {
+            return;
+          }
+          setTimeout(() => location.reload(), 900);
+        } catch (err) {
+          show(`Failed: ${err instanceof Error ? err.message : 'unknown error'}`, 6000);
+        }
+      });
+    });
+
+    // CSV export from the embedded data, not the DOM.
+    document.getElementById('export-csv')?.addEventListener('click', () => {
+      const rows = JSON.parse(document.getElementById('roster-data')!.textContent || '[]') as Record<string, unknown>[];
+      if (rows.length === 0) return show('Nothing to export.');
+      // A cell starting with = + - @ is executed as a formula by Excel and
+      // Sheets. Someone can put that in their own first name; prefix it.
+      const cell = (v: unknown) => {
+        const s = String(v ?? '');
+        const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+        return `"${safe.replace(/"/g, '""')}"`;
+      };
+      const cols = Object.keys(rows[0]);
+      const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = `bounty-signups-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  </script>
+</Site>
