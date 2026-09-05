@@ -1156,7 +1156,47 @@ a.step:hover h3 {
     font-size: 42px;
   }
 }
+/* ── Hall of Fame trophy ─────────────────────────────────────────────────── */
+.hero-hof {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 32px;
+}
+.trophy {
+  width: 150px;
+  height: auto;
+  /* a warm halo, not a hard shadow — reads as gold on both grounds */
+  filter: drop-shadow(0 14px 28px rgba(201, 138, 0, 0.28));
+  animation: trophy-float 5.5s ease-in-out infinite;
+}
+@keyframes trophy-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-8px) rotate(2deg); }
+}
+.hof .inducted svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+  vertical-align: -1px;
+  margin-right: 5px;
+}
+.hof-open .ghost {
+  width: 34px;
+  height: 34px;
+  fill: none;
+  stroke: var(--pill-border);
+  stroke-width: 0.9;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+@media (max-width: 720px) {
+  .hero-hof { grid-template-columns: 1fr; }
+  .trophy { width: 96px; justify-self: start; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .trophy { animation: none; }
   * {
     transition: none !important;
   }

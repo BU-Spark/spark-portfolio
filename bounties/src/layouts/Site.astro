@@ -26,7 +26,9 @@ const canonical = new URL(Astro.url.pathname, SITE).href;
 const NAV = [
   { key: 'board', label: 'Board', href: '/' },
   { key: 'hall', label: 'Hall of Fame', href: '/hall-of-fame' },
-  { key: 'events', label: 'Events', href: '/events' },
+  // Events is hidden from the nav for now; the page and /api/events still
+  // exist and work by URL. Delete this comment and restore the line to show it.
+  // { key: 'events', label: 'Events', href: '/events' },
   { key: 'how', label: 'How it works', href: '/#how-it-works' },
 ];
 ---
@@ -52,14 +54,17 @@ const NAV = [
       rel="stylesheet"
     />
     <script is:inline>
-      // Runs before paint to prevent a flash. Light-first by design, so an
-      // unset preference follows the OS rather than defaulting to dark.
+      // Runs before paint to prevent a flash. Light is the default: an unset
+      // preference gets light regardless of the OS setting, and dark is only
+      // ever reached by the toggle. Matches atlas, which ships light only.
       (function () {
-        var stored = localStorage.getItem('spark-bounties-theme');
-        var theme =
-          stored ||
-          (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme', theme);
+        var stored = null;
+        try {
+          stored = localStorage.getItem('spark-bounties-theme');
+        } catch (e) {
+          /* private mode / storage blocked: fall through to the default */
+        }
+        document.documentElement.setAttribute('data-theme', stored === 'dark' ? 'dark' : 'light');
       })();
     </script>
   </head>
