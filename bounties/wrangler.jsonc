@@ -11,6 +11,16 @@
   // required for node:crypto's MD5 — that need went away with Mailchimp, but
   // the Postgres driver needs the flag regardless.) atlas sets the same flag.
   "compatibility_flags": ["nodejs_compat"],
+  // Wrangler runs this itself before bundling, so `wrangler versions upload`
+  // and `wrangler deploy` cannot be invoked against a dist/ that was never
+  // generated. Workers Builds has a "Build command" field in the dashboard that
+  // does the same job, but it is invisible to this repo and was twice left
+  // empty — producing `The entry-point file at "dist/_worker.js/index.js" was
+  // not found`, which reads like a code fault and is not one. Declaring it here
+  // makes the deploy self-contained and reviewable.
+  "build": {
+    "command": "npm run build"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS"
