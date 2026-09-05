@@ -282,6 +282,14 @@ the invariant via UNIQUE (bounty_slug, person_id); this keeps the mirror honest.
   fire-and-forget write is lost. `?prune=1` also clears tags Postgres does not
   back — the only destructive direction, hence opt-in.
 
+> **Do not run `?prune=1` while hackbu.dev still accepts signups.** hackbu.dev
+> writes into the SAME audience (3baefe8534) from its own API, with the same
+> tag vocabulary, and those signups have no row in this database. Prune would
+> read them as orphans and deactivate them, removing real people from the list
+> comms mails. It becomes safe once hackbu.dev is retired and this app is the
+> only writer. The default (non-prune) path only adds and corrects, so it is
+> safe to run at any time.
+
 ### One-time backfill
 
 Nine signups exist only as Mailchimp tags. Migrate them BEFORE the site goes
