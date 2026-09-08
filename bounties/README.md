@@ -390,6 +390,20 @@ export everything as CSV.
   `payout_cents` is per PERSON (what each one actually receives), so a team of
   two must not record double the pot.
 
+### Connection string gotcha: do not add `sslmode=require`
+
+Railway's TCP proxy (`*.proxy.rlwy.net`) serves a self-signed certificate.
+`pg` 8.16+ treats `sslmode=require` as `verify-full`, so a `DATABASE_URL`
+carrying it fails with *self-signed certificate in certificate chain* — even
+though `psql` on the identical URL connects, because psql uses real libpq where
+`require` means "encrypt, do not verify".
+
+`withDb` therefore strips `sslmode` and `uselibpqcompat` and sets
+`ssl: { rejectUnauthorized: false }` itself. Traffic is encrypted; the chain is
+not verified. Set the secret as a plain
+`postgresql://bounties_app:PASSWORD@HOST:PORT/railway` — extra params are
+harmless but pointless. See `src/lib/db.test.ts`.
+
 ### Declaring winners
 
 `POST /api/admin/declare-winner` marks people as delivered. This is a
