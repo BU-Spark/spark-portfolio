@@ -26,26 +26,40 @@
     "binding": "ASSETS"
   },
   "main": "./dist/_worker.js/index.js",
-  // NO HYPERDRIVE BINDING — deliberately.
+  // HYPERDRIVE IS REQUIRED IN PRODUCTION. It is not an optimisation here.
   //
-  // Hyperdrive is an optimisation, not a requirement. src/lib/db.ts resolves
-  // the connection string as "HYPERDRIVE binding if bound, else DATABASE_URL",
-  // so the app runs either way with zero code change. Creating a Hyperdrive
-  // config needs Cloudflare account access, which would otherwise block anyone
-  // without it from deploying at all — and a placeholder `id` here is worse
-  // than nothing: wrangler hard-fails the deploy on an unknown Hyperdrive ID.
+  // A direct DATABASE_URL connection works locally and CANNOT work from a
+  // Worker, for a reason that has nothing to do with the code. Railway's
+  // Postgres serves a certificate from a private CA:
   //
-  // So the deployable config is a DATABASE_URL secret:
-  //   wrangler secret put DATABASE_URL
-  // pointing at Railway's PUBLIC proxy host (*.proxy.rlwy.net). NOT
-  // *.railway.internal, which resolves only inside Railway's network — no
-  // Worker, with or without Hyperdrive, can reach that host.
+  //     subject CN=localhost   issuer CN=root-ca
+  //     SAN     DNS:localhost, DNS:postgres-b1fc.railway.internal
   //
-  // Trade-off: without Hyperdrive every request opens its own Postgres
-  // connection. Fine at this traffic; the ceiling is Railway's max_connections
-  // (~100 by default), so if the board ever gets busy, add Hyperdrive:
-  //   wrangler hyperdrive create spark-bounties --connection-string="postgresql://..."
-  // then restore the block below with the returned id. Nothing else changes.
+  // Node accepts that when told `rejectUnauthorized: false`. The Workers
+  // runtime has no equivalent — connect()/startTls() validate against
+  // Cloudflare's trust store with no documented way to opt out — so the
+  // handshake fails and pg reports the generic
+  // "Connection terminated unexpectedly". That is what production showed
+  // with DATABASE_URL correctly set.
+  //
+  // Hyperdrive can be told which CA to trust, so it is the way in. Note
+  // `verify-ca`, NOT `verify-full`: the SAN above does not contain the proxy
+  // hostname we connect to, so hostname checking can never pass and we do not
+  // control issuance. Both outcomes were verified against the live server.
+  //
+  //   npx wrangler cert upload certificate-authority \
+  //     --ca-cert certs/railway-postgres-root-ca.pem --name railway-bounties-ca
+  //   npx wrangler hyperdrive create spark-bounties \
+  //     --connection-string="postgresql://bounties_app:PASSWORD@altaria.proxy.rlwy.net:52027/railway" \
+  //     --ca-certificate-id <id from the upload> --sslmode verify-ca
+  //
+  // Then uncomment the block below with the returned Hyperdrive id. No code
+  // changes: src/lib/db.ts already prefers the binding over DATABASE_URL.
+  // Keep the DATABASE_URL secret set — it is what local dev uses.
+  //
+  // A placeholder id is worse than nothing: wrangler hard-fails the deploy on
+  // an unknown Hyperdrive id, which is why this stays commented until the id
+  // exists.
   //
   // "hyperdrive": [
   //   {
