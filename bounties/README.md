@@ -390,6 +390,60 @@ export everything as CSV.
   `payout_cents` is per PERSON (what each one actually receives), so a team of
   two must not record double the pot.
 
+### Production needs Hyperdrive — the Worker cannot connect directly
+
+Verified 2026-09-09 against the live database. Local dev connects straight to
+Railway's TCP proxy; **the deployed Worker cannot**, and no amount of secret
+setting fixes it.
+
+Railway's Postgres serves a certificate from a private CA:
+
+```
+subject : CN=localhost
+issuer  : CN=root-ca
+SAN     : DNS:localhost, DNS:postgres-b1fc.railway.internal
+```
+
+Node accepts it because `withDb` passes `rejectUnauthorized: false`. The
+Workers runtime has no equivalent — `connect()`/`startTls()` validate against
+Cloudflare's trust store and the [TCP socket
+API](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)
+documents no way to opt out. The handshake fails and pg surfaces the generic
+`Connection terminated unexpectedly`, which is what `/dashboard` showed in
+production with `DATABASE_URL` correctly set.
+
+Hyperdrive accepts a CA, so it is the way in. Use **`verify-ca`, not
+`verify-full`**: the SAN above does not include `altaria.proxy.rlwy.net`, so
+hostname checking can never pass and we do not control issuance. Both results
+were confirmed against the live server:
+
+| mode | result |
+|---|---|
+| `verify-full` | fails — `Host: altaria.proxy.rlwy.net is not in the cert's altnames` |
+| `verify-ca` | connects, `authorized=true` |
+
+```bash
+npx wrangler cert upload certificate-authority \
+  --ca-cert certs/railway-postgres-root-ca.pem --name railway-bounties-ca
+
+npx wrangler hyperdrive create spark-bounties \
+  --connection-string="postgresql://bounties_app:PASSWORD@altaria.proxy.rlwy.net:52027/railway" \
+  --ca-certificate-id <id from the upload> --sslmode verify-ca
+```
+
+Then uncomment the `hyperdrive` block in `wrangler.jsonc` with the returned id
+and deploy. No code changes: `resolveConnectionString` already prefers the
+binding. Keep the `DATABASE_URL` secret — local dev uses it.
+
+Hyperdrive also pools connections, which this app wants anyway: without it
+every request opens its own Postgres connection against Railway's
+`max_connections`.
+
+The CA is committed at `certs/railway-postgres-root-ca.pem` (a public
+certificate, not a secret) and can be re-extracted with
+`node scripts/dump-db-cert.mjs`. It expires 2028-11-30 and changes if the
+Postgres service is recreated.
+
 ### Connection string gotcha: do not add `sslmode=require`
 
 Railway's TCP proxy (`*.proxy.rlwy.net`) serves a self-signed certificate.
