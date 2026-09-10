@@ -43,15 +43,48 @@ function resolveConnectionString(locals?: unknown): string {
 }
 
 /**
+ * Remove `sslmode` from a connection string so the explicit `ssl` option below
+ * is what decides TLS behaviour.
+ *
+ * Not cosmetic. pg >= 8.16 treats `sslmode=require` as `verify-full`, unlike
+ * libpq, where it means "encrypt, do not verify". Railway's TCP proxy serves a
+ * self-signed certificate, so a URL carrying `sslmode=require` fails with
+ * "self-signed certificate in certificate chain" — while `psql` on the very
+ * same URL succeeds, because psql uses real libpq. Anyone setting this secret
+ * by hand is likely to append `sslmode=require`, so strip it rather than
+ * depend on them not doing so.
+ */
+export function stripSslMode(url: string): string {
+  // Cheap reject before paying for URL parsing.
+  if (!/[?&](sslmode|uselibpqcompat)=/i.test(url)) return url;
+  try {
+    const u = new URL(url);
+    // Case-insensitively: searchParams.delete() matches the key exactly, so a
+    // hand-typed `SSLMode=` would otherwise survive. Snapshot the keys first,
+    // since deleting while iterating skips entries.
+    for (const key of [...u.searchParams.keys()]) {
+      if (/^(sslmode|uselibpqcompat)$/i.test(key)) u.searchParams.delete(key);
+    }
+    return u.toString();
+  } catch {
+    // An unparseable string is the caller's problem; pg will report it better.
+    return url;
+  }
+}
+
+/**
  * Run `fn` with a connected client, always closing it.
  * Pass the API route's `locals` so the Hyperdrive binding can be found.
  */
 export async function withDb<T>(locals: unknown, fn: (db: Client) => Promise<T>): Promise<T> {
-  const connectionString = resolveConnectionString(locals);
-  const isLocal = /localhost|127\.0\.0\.1/.test(connectionString);
+  const raw = resolveConnectionString(locals);
+  const isLocal = /localhost|127\.0\.0\.1/.test(raw);
+  const connectionString = isLocal ? raw : stripSslMode(raw);
   const client = new Client({
     connectionString,
     // Railway's public Postgres endpoint requires TLS; a local socket doesn't.
+    // rejectUnauthorized: false because the TCP proxy presents a self-signed
+    // cert — traffic is encrypted, the certificate chain is not verified.
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
   });
   await client.connect();
