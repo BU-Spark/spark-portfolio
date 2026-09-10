@@ -439,10 +439,22 @@ Hyperdrive also pools connections, which this app wants anyway: without it
 every request opens its own Postgres connection against Railway's
 `max_connections`.
 
-The CA is committed at `certs/railway-postgres-root-ca.pem` (a public
-certificate, not a secret) and can be re-extracted with
-`node scripts/dump-db-cert.mjs`. It expires 2028-11-30 and changes if the
-Postgres service is recreated.
+The CA is committed at `certs/railway-postgres-root-ca.pem`. It is a **public
+certificate, not a secret** — no private key, and the server hands it to every
+client during the handshake — so it is deliberately not gitignored. It is also
+not downloadable from the Railway dashboard or CLI: the
+[`postgres-ssl`](https://github.com/railwayapp-templates/postgres-ssl) image
+generates it inside the container and leaves it on the data volume. We take it
+off the wire instead:
+
+```bash
+node scripts/dump-db-cert.mjs   # re-extract the chain
+node scripts/check-db-tls.mjs   # prove verify-ca works and verify-full does not
+```
+
+It survives restarts and redeploys — `init-ssl.sh` reissues only the server
+leaf and deliberately never rotates the CA — so the upload to Cloudflare is a
+one-time step. See `certs/README.md`.
 
 ### Connection string gotcha: do not add `sslmode=require`
 
