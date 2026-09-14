@@ -110,15 +110,46 @@ CREATE INDEX IF NOT EXISTS bounty_interest_completed_idx
 -- instead of a join you have to remember. CREATE OR REPLACE keeps them
 -- idempotent. Bounty *titles* live in markdown, not the DB, so these key on
 -- slug only.
+-- =============================================================================
+-- A bounty's prize is won by a TEAM, not by each member.
+--
+-- payout_cents on bounty_interest recorded money per person, so marking a team
+-- of four as delivered on a $200 bounty recorded $800 -- the prize multiplied by
+-- however many people happened to be on the team. The award is one fact about
+-- (bounty, team), so it is stored once, here.
+--
+-- team_key is bounty_interest.team_id, or 'person:<id>' for someone who
+-- delivered solo -- a team of one, so the same row shape covers both and no
+-- query needs a special case.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS bounty_award (
+  bounty_slug    text        NOT NULL,
+  team_key       text        NOT NULL,
+  payout_cents   integer     NOT NULL DEFAULT 0 CHECK (payout_cents >= 0),
+  submission_url text,
+  awarded_at     timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (bounty_slug, team_key)
+);
+
 CREATE OR REPLACE VIEW bounty_roster AS
 SELECT bi.bounty_slug,
        p.email, p.first_name, p.last_name,
        bi.intent, bi.working_mode, bi.team_id,
        bi.created_at AS joined_at,
-       bi.submitted_at, bi.completed_at, bi.payout_cents,
-       bi.submission_url
+       bi.submitted_at, bi.completed_at,
+       -- The team's key and ITS award. payout_cents is repeated across the
+       -- members of a team by this join, so never SUM it here -- sum
+       -- bounty_award instead, which has one row per team. bi.payout_cents is
+       -- kept for the rows written before awards existed.
+       coalesce(bi.team_id, 'person:' || bi.person_id::text) AS team_key,
+       a.payout_cents AS team_payout_cents,
+       bi.payout_cents,
+       coalesce(a.submission_url, bi.submission_url) AS submission_url
 FROM bounty_interest bi
-JOIN person p ON p.id = bi.person_id;
+JOIN person p ON p.id = bi.person_id
+LEFT JOIN bounty_award a
+       ON a.bounty_slug = bi.bounty_slug
+      AND a.team_key = coalesce(bi.team_id, 'person:' || bi.person_id::text);
 
 -- One row per PERSON across all bounties: SELECT * FROM bounty_people;
 CREATE OR REPLACE VIEW bounty_people AS
@@ -128,8 +159,10 @@ SELECT p.email, p.first_name, p.last_name,
        min(bi.created_at)                              AS first_joined,
        max(bi.created_at)                              AS last_joined,
        -- "who actually delivered", which bounty_count does NOT answer
-       count(bi.completed_at)                          AS completed_count,
-       coalesce(sum(bi.payout_cents), 0)               AS total_payout_cents
+       -- No per-person money column. An award belongs to a team, and splitting
+       -- it between members is a fiction the program does not make. This counts
+       -- what someone delivered; bounty_award holds what was paid.
+       count(bi.completed_at)                          AS completed_count
 FROM person p
 JOIN bounty_interest bi ON bi.person_id = p.id
 GROUP BY p.id, p.email, p.first_name, p.last_name;

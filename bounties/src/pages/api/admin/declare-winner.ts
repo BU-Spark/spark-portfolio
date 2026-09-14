@@ -71,6 +71,8 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       const cleared = await withDb(locals, (db) => clearCompleted(db, { bountySlug: slug, emails }));
       return json({ success: true, cleared });
     }
+    // One prize, recorded once per team — not per person. markCompleted derives
+    // the team(s) from the rows it actually marked.
     const result = await withDb(locals, (db) =>
       markCompleted(db, { bountySlug: slug, emails, payoutCents, submissionUrl })
     );
