@@ -28,7 +28,8 @@ if (Astro.request.method === 'POST') {
 
   if (action === 'logout') {
     Astro.cookies.delete(ADMIN_COOKIE, { path: '/' });
-    authorized = false;
+    // Redirect rather than render: see the note on the sign-in branch below.
+    return Astro.redirect('/dashboard', 303);
   } else {
     // Limit EVERY attempt, before comparing. hackbu.dev only counted failures
     // and still let a correct guess through on attempt 50 — which made the
@@ -40,7 +41,6 @@ if (Astro.request.method === 'POST') {
     } else if (!adminKey) {
       authError = 'ADMIN_KEY is not configured on this deployment.';
     } else if (provided === adminKey) {
-      authorized = true;
       Astro.cookies.set(ADMIN_COOKIE, adminKey, {
         path: '/',
         httpOnly: true,
@@ -48,6 +48,13 @@ if (Astro.request.method === 'POST') {
         sameSite: 'strict',
         maxAge: 60 * 60 * 4,
       });
+      // Post/Redirect/Get. Rendering the dashboard straight out of the sign-in
+      // POST leaves the browser holding a POST for this URL, so the
+      // location.reload() every action performs re-submits it and the browser
+      // asks "Resend?" — mid-workflow, right after "Marked 4 delivered",
+      // which reads like the action failed or is about to be repeated.
+      // 303 specifically: it tells the browser to follow with GET.
+      return Astro.redirect('/dashboard', 303);
     } else {
       authError = 'Incorrect key.';
     }
