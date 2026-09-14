@@ -15,7 +15,45 @@ planning thread. **They are the same application**, addressed twice:
 | Hostname | Serves | What it is |
 |---|---|---|
 | `bounties.buspark.io/` | `src/pages/index.astro` | the whole board, every track |
-| `hackbu.buspark.io/` | `/tracks/hackbu` (via a Cloudflare route), from `src/pages/tracks/[track].astro` | the HackBU track's front door |
+| `hackbu.buspark.io/` | `/tracks/hackbu`, from `src/pages/tracks/[track].astro` | the HackBU track's front door |
+
+Both are `custom_domain` entries in `wrangler.jsonc`, so wrangler creates the
+DNS records itself — there is no dashboard step and no Cloudflare rewrite rule.
+
+### How the track hostname works, and the trap in it
+
+`src/middleware.ts` reads the `Host` header and, for the ROOT path only, answers
+with that track's prerendered page from the asset binding. `src/lib/hostname.ts`
+holds the mapping as a pure function (`hackbu.buspark.io` → `hackbu`, matched on
+the first label so ports, case and preview spellings all work), covered by
+`src/lib/hostname.test.ts`.
+
+Only `/` is remapped. `hackbu.buspark.io/bounties/<slug>` is still that bounty
+and `/api/*` works under either name, so nothing has to know which hostname it
+was reached by.
+
+**`src/pages/index.astro` sets `prerender = false`, and that is load-bearing.**
+Under `output: 'hybrid'` the generated worker answers a prerendered path
+straight from `env.ASSETS` and never enters the Astro app, so middleware cannot
+see it. While `/` was prerendered this mapping was unreachable code that looked
+correct. Re-prerendering that page silently breaks `hackbu.buspark.io` while
+every build, test and typecheck stays green.
+
+The response is rebuilt rather than passed through because an asset response is
+immutable, and it carries `Vary: Host` — the same URL now returns different
+bodies per hostname, and without that header a cache in front of the Worker
+could serve the board to HackBU visitors.
+
+### Testing a hostname locally
+
+`wrangler dev` **overrides the `Host` header** with the first configured route,
+so `curl -H "Host: hackbu.buspark.io"` silently tests the wrong thing — it will
+return the board and look like the mapping is broken. Use the flag instead:
+
+```bash
+npx wrangler dev --host hackbu.buspark.io   # serves the HackBU page at /
+npx wrangler dev --host bounties.buspark.io # serves the board at /
+```
 
 `/tracks/<id>` exists for exactly this reason: a track can have its own
 hostname, heading, and blurb without being a second codebase. The other tracks
@@ -104,16 +142,21 @@ that is the natural place to start if transactional email is wanted back.
 ## Environment
 
 **Production** — the database arrives through the `HYPERDRIVE` binding in
-`wrangler.jsonc`, not an env var. The only secret is:
+`wrangler.jsonc`, not an env var. All of these are set on the `bounties-site`
+service (confirmed 2026-09-14):
 
 ```
 EVENTBRITE_TOKEN        # wrangler secret put EVENTBRITE_TOKEN
 SLACK_SIGNING_SECRET    # wrangler secret put SLACK_SIGNING_SECRET
-DATABASE_URL            # wrangler secret put DATABASE_URL  (required)
 MAILCHIMP_API_KEY       # mailer only — see "Mailchimp" below
 MAILCHIMP_AUDIENCE_ID   # 3baefe8534 ("Spark! Bounty Board")
-ADMIN_KEY               # guards /api/mailchimp/reconcile
+ADMIN_KEY               # guards /api/mailchimp/reconcile and /dashboard
 ```
+
+`DATABASE_URL` is deliberately **not** in that list. It was required before the
+Hyperdrive binding existed; now `resolveConnectionString` takes the binding
+first, so in production the secret can never be read. Setting it is harmless
+but misleading — it looks like the live connection and is not.
 
 **Local dev** — export a dev database URL before `npm run dev`:
 
@@ -373,16 +416,23 @@ without releasing it); the production branch deploys for real. So a merge to
 
 ### After a green build
 
-Static pages work immediately, but every `/api/*` route returns 500 until:
+Both prerequisites are **done** — recorded here because neither is visible from
+the repo and a future failure will look identical to them never having happened:
 
-1. **Railway Public Access** is enabled on `Bounties Prod DB`. Cloudflare
-   cannot resolve `postgres-b1fc.railway.internal` — that is private Railway
-   DNS, and no Worker can reach it, Hyperdrive or not.
-2. `wrangler secret put DATABASE_URL` with the `*.proxy.rlwy.net` connection
-   string for the `bounties_app` role (NOT the superuser).
+1. **Railway Public Access** is enabled on `Bounties Prod DB`. It has to be:
+   Cloudflare cannot resolve `postgres-b1fc.railway.internal`, which is private
+   Railway DNS that no Worker can reach, Hyperdrive or not. The Hyperdrive
+   config was created against the `*.proxy.rlwy.net` host, so its existence is
+   itself evidence this is on.
+2. **Secrets are set** on `bounties-site` — see § "Environment" for the list.
+   `DATABASE_URL` is not among them and is not needed; the binding wins.
 
-Rotate the `postgres` superuser password BEFORE enabling public access.
-Railway's own warning is accurate: anyone with the string can connect.
+The `postgres` superuser password was rotated before public access went on.
+Railway's warning is accurate: anyone with the string can connect.
+
+If `/api/*` starts returning 500 again, the first thing to check is whether the
+Hyperdrive id in `wrangler.jsonc` still resolves to a live config — a deleted
+or recreated Hyperdrive fails exactly like a missing secret.
 
 
 ## Admin: `/dashboard`
