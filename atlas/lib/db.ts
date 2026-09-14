@@ -2666,7 +2666,7 @@ export async function rejectUploadRequest(
 // exist yet.
 
 /** What kind of stall an approval item represents. Drives the page's grouping. */
-export type ApprovalKind = "screenshots" | "nudge" | "inbox" | "draft";
+export type ApprovalKind = "screenshots" | "nudge" | "inbox" | "draft" | "suggestion";
 
 export interface ApprovalItem {
   kind: ApprovalKind;
@@ -2687,7 +2687,7 @@ export interface ApprovalItem {
  * foreign rows stay visible so a mis-filed project is noticeable — a worklist must
  * only contain rows you can act on, matching listUploadRequests.
  *
- * One round trip: the four sources are UNION ALLed so the ordering is done once, in
+ * One round trip: the five sources are UNION ALLed so the ordering is done once, in
  * SQL, rather than merged and re-sorted per source in JS.
  */
 export async function listOpenApprovals(scope: {
@@ -2696,6 +2696,7 @@ export async function listOpenApprovals(scope: {
 }): Promise<ApprovalItem[]> {
   await ensureIngestTables();
   await ensureUploadRequestsTable();
+  await ensureSuggestionsTable();
   const rows = await query<{
     kind: ApprovalKind;
     ref: string;
@@ -2766,6 +2767,18 @@ export async function listOpenApprovals(scope: {
         -- anti-noise rule that keeps data gaps out of this queue. The Visibility
         -- filter on /admin/projects is where that list belongs.
         WHERE p.visibility = 'hidden' AND ($1 OR p.owner_org = $2)
+
+       UNION ALL
+       -- A BU viewer offered information on a project. Folded in here rather than
+       -- kept behind its own rail entry: it is the same job as every other row —
+       -- something a person has to decide on — and a queue nobody is prompted to
+       -- visit is a queue nobody works. /admin/suggestions remains where the
+       -- deciding happens, exactly like screenshots and inbox rows.
+       SELECT 'suggestion', s.id::text, p.title,
+              'Suggested by ' || s.submitted_by,
+              p.owner_org, s.created_at
+         FROM project_suggestions s JOIN projects p ON p.id = s.project_id
+        WHERE s.status = 'pending' AND ($1 OR p.owner_org = $2)
      ) q
      ORDER BY waiting_since ASC`,
     [scope.isSuper, scope.org]
