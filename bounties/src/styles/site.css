@@ -1308,3 +1308,16 @@ a.step:hover h3 {
     transform: none;
   }
 }
+
+/* Hall of Fame, when the database could not be reached. Quiet but unmissable:
+   the alternative is a list that looks complete and is silently missing whoever
+   was declared a winner most recently. */
+.hof-degraded {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--diff-advanced);
+  background: var(--diff-advanced-wash);
+  border-radius: var(--r-sm);
+  font-size: 13.5px;
+  max-width: 52ch;
+}
