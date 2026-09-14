@@ -115,11 +115,23 @@ MAILCHIMP_AUDIENCE_ID   # 3baefe8534 ("Spark! Bounty Board")
 ADMIN_KEY               # guards /api/mailchimp/reconcile
 ```
 
-**Local dev** — put a connection string in `bounties/.dev.vars` (gitignored):
+**Local dev** — export a dev database URL before `npm run dev`:
 
+```bash
+export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://user:password@host:port/db
+npm run dev
 ```
-DATABASE_URL=postgresql://user:password@host:port/db
-```
+
+This is not optional, and `DATABASE_URL` in `.dev.vars` will not do it. The
+`HYPERDRIVE` binding is live in `wrangler.jsonc`, `astro dev` populates it, and
+`resolveConnectionString` takes the binding first — so the `.dev.vars` value is
+never read. Wrangler also refuses to start local emulation when a configured
+Hyperdrive binding has no local connection string from either source.
+
+Do **not** "fix" that startup error by adding a `localConnectionString` to
+`wrangler.jsonc`. It silences the error and then shadows `DATABASE_URL` with an
+address nothing is listening on, so every DB-backed page fails at query time
+instead of failing loudly at boot.
 
 Two traps, both of which cost real time:
 
@@ -131,12 +143,9 @@ Two traps, both of which cost real time:
 2. **Miniflare requires a password in the string.** A trust-auth local database
    with no password fails validation before the server even starts.
 
-To point local dev at a real database through the Hyperdrive code path rather
-than the `DATABASE_URL` fallback, override per-shell:
-
-```bash
-WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://... npm run dev
-```
+The `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_*` spelling still works but is
+deprecated; wrangler checks the `CLOUDFLARE_`-prefixed name first and warns on
+the old one.
 
 ## Applying the schema
 
@@ -178,9 +187,19 @@ Hyperdrive owns the origin-side pool and a retained pool's stale sockets cause
 intermittent 1101s. `src/lib/db.ts` therefore opens a `Client` per request and
 closes it in a `finally`.
 
-`hyperdrive[].localConnectionString` is required even for **deploys**, not just
-local dev: wrangler calls `getPlatformProxy()` to read the env, which starts
-miniflare, which cannot use a real Hyperdrive config and throws without it.
+`hyperdrive[].localConnectionString` is a **local-dev** concern only, despite
+what you may read elsewhere. Wrangler's check is gated on local emulation
+(`if (local && ...)` in `applyHyperdriveEnvVars`), and the Astro adapter builds
+the platform proxy only in its `astro:server:setup` hook — which runs for
+`astro dev`, not `astro build`. Deploys never reach it.
+
+`atlas/wrangler.jsonc` *does* carry a placeholder `localConnectionString`, and
+that is correct there, not an inconsistency to tidy up: `wrangler deploy` on an
+OpenNext project delegates to `opennextjs-cloudflare deploy`, which calls
+`getPlatformProxy()` and so trips the check at deploy time. It is also harmless
+there because `getCloudflareContext()` throws under plain `next dev`, so atlas
+never takes the binding locally. Here, `astro dev` does — which is exactly why
+the same placeholder would break this app.
 
 Rate limiting is still the in-memory limiter in `src/lib/rate-limit.ts`, which
 resets per isolate and so is weaker on Workers than it looks. atlas uses
@@ -431,9 +450,9 @@ npx wrangler hyperdrive create spark-bounties \
   --ca-certificate-id <id from the upload> --sslmode verify-ca
 ```
 
-Then uncomment the `hyperdrive` block in `wrangler.jsonc` with the returned id
-and deploy. No code changes: `resolveConnectionString` already prefers the
-binding. Keep the `DATABASE_URL` secret — local dev uses it.
+The `hyperdrive` block in `wrangler.jsonc` is already live with the id this
+returned; a re-run only needs that id swapped. No code changes:
+`resolveConnectionString` already prefers the binding.
 
 Hyperdrive also pools connections, which this app wants anyway: without it
 every request opens its own Postgres connection against Railway's
