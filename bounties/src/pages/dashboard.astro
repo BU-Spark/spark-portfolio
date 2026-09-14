@@ -55,7 +55,8 @@ if (Astro.request.method === 'POST') {
 }
 
 // ── data ─────────────────────────────────────────────────────────────────────
-type Team = { id: string; members: RosterFull[] };
+/** awardCents is the TEAM's prize, not a per-member figure. */
+type Team = { id: string; members: RosterFull[]; awardCents: number | null };
 type Section = {
   slug: string;
   title: string;
@@ -97,7 +98,13 @@ if (authorized) {
       prize: meta?.prize ?? 0,
       inContent: !!meta,
       rows,
-      teams: [...teamMap].map(([id, members]) => ({ id, members })),
+      teams: [...teamMap].map(([id, members]) => ({
+        id,
+        members,
+        // Every member carries the same award (the view repeats it), so read it
+        // off the first one that has it rather than adding them up.
+        awardCents: members.find((m) => m.team_payout_cents != null)?.team_payout_cents ?? null,
+      })),
       solo: rows.filter((r) => !r.team_id && r.intent === 'interested'),
       lookingForTeam: rows.filter((r) => r.intent === 'looking_for_team'),
       completed: rows.filter((r) => r.completed_at),
@@ -116,7 +123,11 @@ const stats = {
   signups: roster.length,
   lookingForTeam: roster.filter((r) => r.intent === 'looking_for_team').length,
   completed: roster.filter((r) => r.completed_at).length,
-  payout: roster.reduce((n, r) => n + (r.payout_cents ?? 0), 0),
+  // One award per team, so de-duplicate by team_key before summing. Adding up
+  // roster rows would multiply every prize by its team's headcount.
+  payout: [...new Map(
+    roster.filter((r) => r.completed_at).map((r) => [r.team_key, r.team_payout_cents ?? r.payout_cents ?? 0])
+  ).values()].reduce((n, c) => n + c, 0),
 };
 
 // Data for the client-side CSV export. Built from data, not scraped from the
@@ -132,7 +143,7 @@ const exportJson = JSON.stringify(
     mode: r.working_mode,
     team: r.team_id ?? '',
     completed: r.completed_at ?? '',
-    payout_cents: r.payout_cents ?? '',
+    team_payout_cents: r.team_payout_cents ?? r.payout_cents ?? '',
     submission: r.submission_url ?? '',
   }))
 ).replace(/</g, '\\u003c');
@@ -206,7 +217,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
                     {s.completed.map((r) => (
                       <div class="row">
                         <span class="who">{r.first_name} {r.last_name} <em>{r.email}</em></span>
-                        <span class="meta">{r.payout_cents != null ? dollars(r.payout_cents) : ''} {r.submission_url && <a href={r.submission_url} target="_blank" rel="noopener">submission ↗</a>}</span>
+                        <span class="meta">{r.submission_url && <a href={r.submission_url} target="_blank" rel="noopener">submission ↗</a>}</span>
                         <button class="lnk" data-act="unwin" data-email={r.email} type="button">undo</button>
                       </div>
                     ))}
@@ -215,10 +226,13 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
 
                 {s.teams.map((t) => (
                   <div class="grp">
-                    <div class="grp-label">Team <code>{t.id}</code> · {t.members.length}</div>
+                    <div class="grp-label">
+                      Team <code>{t.id}</code> · {t.members.length}
+                      {t.awardCents != null && <span class="award"> · {dollars(t.awardCents)} awarded</span>}
+                    </div>
                     {t.members.map((r) => (
                       <div class="row">
-                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                        <label class="who"><input type="checkbox" value={r.email} data-team={r.team_key} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
                         <button class="lnk" data-act="unteam" data-email={r.email} type="button">remove from team</button>
                       </div>
                     ))}
@@ -230,7 +244,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
                     <div class="grp-label">Solo · {s.solo.length}</div>
                     {s.solo.map((r) => (
                       <div class="row">
-                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                        <label class="who"><input type="checkbox" value={r.email} data-team={r.team_key} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
                       </div>
                     ))}
                   </div>
@@ -241,7 +255,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
                     <div class="grp-label accent">Looking for teammates · {s.lookingForTeam.length}</div>
                     {s.lookingForTeam.map((r) => (
                       <div class="row">
-                        <label class="who"><input type="checkbox" value={r.email} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
+                        <label class="who"><input type="checkbox" value={r.email} data-team={r.team_key} /> {r.first_name} {r.last_name} <em>{r.email}</em></label>
                       </div>
                     ))}
                   </div>
@@ -288,6 +302,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
     .fld-sm.wide { width: 260px; }
     .grp { padding: 8px 0; }
     .grp-label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); margin-bottom: 6px; }
+    .grp-label .award { color: var(--ok-ink); }
     .grp-label.ok { color: var(--ok-ink); } .grp-label.accent { color: var(--accent-ink); }
     .grp-label code { font-family: var(--mono); text-transform: none; letter-spacing: 0; }
     .row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid var(--divider); font-size: 14px; }
@@ -348,22 +363,23 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
             if (emails.length === 0) return show('Check who delivered first.');
             const payoutField = sec.querySelector<HTMLInputElement>('[data-field=payout]')!;
             const urlField = sec.querySelector<HTMLInputElement>('[data-field=url]')!;
-            // payout_cents is PER PERSON — what each one actually receives. The
-            // prize is one pot, so the default splits it evenly; a team of two
-            // must not record double the money. Typing a value overrides per head.
-            const perHead =
-              payoutField.value === ''
-                ? Math.round((prizeDefault * 100) / emails.length) / 100
-                : Number(payoutField.value);
-            if (!Number.isFinite(perHead) || perHead < 0) return show('Payout must be a non-negative number.');
-            const total = perHead * emails.length;
-            if (!confirm(`Mark ${emails.length} as delivered on "${slug}" at $${perHead} each ($${total} total)?`)) return;
-            const dollars = perHead;
+            // The prize is the TEAM's, sent once. This field used to be read as
+            // a per-head figure, so typing the bounty's own prize (the value the
+            // placeholder suggests) recorded it against every member -- $200 on a
+            // team of four became $800. The server stores one award per team.
+            const award = payoutField.value === '' ? prizeDefault : Number(payoutField.value);
+            if (!Number.isFinite(award) || award < 0) return show('Payout must be a non-negative number.');
+            const teams = new Set(
+              [...sec.querySelectorAll<HTMLInputElement>('input[type=checkbox]:checked')]
+                .map((c) => c.dataset.team || c.value)
+            );
+            const plural = teams.size === 1 ? 'the team' : `${teams.size} teams`;
+            if (!confirm(`Mark ${emails.length} as delivered on "${slug}" and award $${award} to ${plural}?`)) return;
             const r = await post('/api/admin/declare-winner', {
               slug,
               emails,
               // integer cents on the wire; no float leaves this page
-              payoutCents: Math.round(dollars * 100),
+              payoutCents: Math.round(award * 100),
               submissionUrl: urlField.value.trim() || undefined,
             });
             show(`Marked ${(r.marked as string[]).length} delivered${(r.unknown as string[]).length ? `, ${(r.unknown as string[]).length} unknown` : ''}`);

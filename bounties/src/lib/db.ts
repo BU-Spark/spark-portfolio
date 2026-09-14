@@ -363,6 +363,11 @@ export interface RosterFull extends RosterRow {
   joined_at: string;
   submitted_at: string | null;
   completed_at: string | null;
+  /** team_id, or 'person:<id>' for a solo winner — what an award is keyed by. */
+  team_key: string;
+  /** The TEAM's award. Repeated across members by the view; never SUM it. */
+  team_payout_cents: number | null;
+  /** Pre-award rows only. New writes leave this null — see markCompleted. */
   payout_cents: number | null;
   submission_url: string | null;
 }
@@ -382,29 +387,60 @@ export async function fullRoster(db: Client): Promise<RosterFull[]> {
  * satisfied atomically. payoutCents / submissionUrl of undefined leave the
  * existing value alone rather than clearing it.
  */
+/**
+ * Mark people as having delivered, and record the team's award ONCE.
+ *
+ * `payoutCents` is the bounty's prize — one number for the whole team. It used
+ * to be written to every member's row, so a team of four on a $200 bounty
+ * recorded $800. Members now carry delivery state only; the money lives in
+ * bounty_award, keyed by (bounty, team), where it cannot multiply by headcount.
+ *
+ * Marking people on two different teams in one call awards each team the full
+ * prize — that is a deliberate, visible act (two team headers, two amounts),
+ * not the silent arithmetic the old shape produced.
+ */
 export async function markCompleted(
   db: Client,
   opts: { bountySlug: string; emails: string[]; payoutCents?: number; submissionUrl?: string }
-): Promise<{ marked: string[]; unknown: string[] }> {
+): Promise<{ marked: string[]; unknown: string[]; teams: string[] }> {
   const marked: string[] = [];
   const unknown: string[] = [];
+  const teamKeys = new Set<string>();
+
   for (const raw of opts.emails) {
     const email = raw.trim().toLowerCase();
-    const { rows } = await db.query<{ email: string }>(
+    const { rows } = await db.query<{ email: string; team_key: string }>(
       `UPDATE bounty_interest bi
-          SET completed_at   = COALESCE(bi.completed_at, now()),
-              submitted_at   = COALESCE(bi.submitted_at, now()),
-              payout_cents   = COALESCE($3, bi.payout_cents),
-              submission_url = COALESCE($4, bi.submission_url),
-              updated_at     = now()
+          SET completed_at = COALESCE(bi.completed_at, now()),
+              submitted_at = COALESCE(bi.submitted_at, now()),
+              updated_at   = now()
          FROM person p
         WHERE p.id = bi.person_id AND bi.bounty_slug = $1 AND p.email = $2
-    RETURNING p.email`,
-      [opts.bountySlug, email, opts.payoutCents ?? null, opts.submissionUrl ?? null]
+    RETURNING p.email,
+              COALESCE(bi.team_id, 'person:' || bi.person_id::text) AS team_key`,
+      [opts.bountySlug, email]
     );
-    (rows.length ? marked : unknown).push(email);
+    if (rows.length) {
+      marked.push(email);
+      teamKeys.add(rows[0].team_key);
+    } else {
+      unknown.push(email);
+    }
   }
-  return { marked, unknown };
+
+  // Award per team. Nothing to award if no row matched — writing an award for a
+  // team with no delivered members would be money attached to nobody.
+  for (const teamKey of teamKeys) {
+    await db.query(
+      `INSERT INTO bounty_award (bounty_slug, team_key, payout_cents, submission_url)
+            VALUES ($1, $2, COALESCE($3, 0), $4)
+       ON CONFLICT (bounty_slug, team_key) DO UPDATE
+            SET payout_cents   = COALESCE($3, bounty_award.payout_cents),
+                submission_url = COALESCE($4, bounty_award.submission_url)`,
+      [opts.bountySlug, teamKey, opts.payoutCents ?? null, opts.submissionUrl ?? null]
+    );
+  }
+  return { marked, unknown, teams: [...teamKeys] };
 }
 
 /** Undo a declaration. Clears payout too — the CHECK forbids paid-but-not-done. */
@@ -412,13 +448,26 @@ export async function clearCompleted(
   db: Client,
   opts: { bountySlug: string; emails: string[] }
 ): Promise<number> {
+  const emails = opts.emails.map((e) => e.trim().toLowerCase());
   const { rowCount } = await db.query(
     `UPDATE bounty_interest bi
         SET completed_at = NULL, payout_cents = NULL, submission_url = NULL, updated_at = now()
        FROM person p
       WHERE p.id = bi.person_id AND bi.bounty_slug = $1
         AND p.email = ANY($2::text[])`,
-    [opts.bountySlug, opts.emails.map((e) => e.trim().toLowerCase())]
+    [opts.bountySlug, emails]
+  );
+  // Drop the award only once NOBODY on that team is still marked delivered.
+  // Undoing one member of four must not delete the team's award.
+  await db.query(
+    `DELETE FROM bounty_award a
+      WHERE a.bounty_slug = $1
+        AND NOT EXISTS (
+              SELECT 1 FROM bounty_interest bi
+               WHERE bi.bounty_slug = a.bounty_slug
+                 AND COALESCE(bi.team_id, 'person:' || bi.person_id::text) = a.team_key
+                 AND bi.completed_at IS NOT NULL)`,
+    [opts.bountySlug]
   );
   return rowCount ?? 0;
 }
@@ -435,15 +484,19 @@ export interface HallOfFameRow {
 /** One row per completed bounty, for the public Hall of Fame. */
 export async function hallOfFame(db: Client): Promise<HallOfFameRow[]> {
   const { rows } = await db.query<HallOfFameRow>(
-    `SELECT bounty_slug,
-            string_agg(first_name || ' ' || last_name, ', ' ORDER BY last_name, first_name) AS names,
-            max(submission_url)              AS submission_url,
-            max(completed_at)::text          AS completed_at,
-            coalesce(sum(payout_cents), 0)::int AS payout_cents
-       FROM bounty_roster
-      WHERE completed_at IS NOT NULL
-      GROUP BY bounty_slug
-      ORDER BY max(completed_at) DESC`
+    // Payout is summed from bounty_award, NOT from the roster: the roster repeats
+    // a team's award across its members, so summing there multiplies the prize by
+    // headcount. Awards are joined as a scalar subquery for that reason.
+    `SELECT r.bounty_slug,
+            string_agg(r.first_name || ' ' || r.last_name, ', ' ORDER BY r.last_name, r.first_name) AS names,
+            max(r.submission_url)     AS submission_url,
+            max(r.completed_at)::text AS completed_at,
+            coalesce((SELECT sum(a.payout_cents) FROM bounty_award a
+                       WHERE a.bounty_slug = r.bounty_slug), 0)::int AS payout_cents
+       FROM bounty_roster r
+      WHERE r.completed_at IS NOT NULL
+      GROUP BY r.bounty_slug
+      ORDER BY max(r.completed_at) DESC`
   );
   return rows;
 }
