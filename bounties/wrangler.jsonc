@@ -73,11 +73,32 @@
       "id": "0e0e6b931a654f4f8ebc183eb0ef0bc7"
     }
   ],
-  // Secrets are NOT set here — use `wrangler secret put`:
-  //   DATABASE_URL           (required; see the note above)
+  // Without this the Worker exists only at its workers.dev address: the build
+  // goes green, the deploy succeeds, and every documented URL — including the
+  // Slack slash-command endpoint — resolves to NXDOMAIN. `custom_domain: true`
+  // makes wrangler create the DNS record, the same way atlas.buspark.io is set
+  // up, so this needs no dashboard step.
+  //
+  // hackbu.buspark.io is deliberately NOT here. It has to serve /tracks/hackbu
+  // rather than the board root, and nothing in src/ reads the Host header — a
+  // custom_domain would just serve the full board under a second name. That
+  // mapping needs a Cloudflare rewrite rule (or Astro middleware), so adding
+  // the hostname before either exists would ship a wrong page, not a missing
+  // one. See README.md § "Hostnames".
+  "routes": [
+    {
+      "pattern": "bounties.buspark.io",
+      "custom_domain": true
+    }
+  ],
+  // Secrets are NOT set here — use `wrangler secret put`. All are configured on
+  // the bounties-site service as of 2026-09-14:
   //   EVENTBRITE_TOKEN
-  //   SLACK_SIGNING_SECRET   (only if /bounty-signups is in use)
-  // See README.md § "Environment".
+  //   SLACK_SIGNING_SECRET
+  //   MAILCHIMP_API_KEY / MAILCHIMP_AUDIENCE_ID
+  //   ADMIN_KEY
+  // DATABASE_URL is NOT among them and is not needed: the Hyperdrive binding
+  // above wins in production. See README.md § "Environment".
   "observability": {
     "enabled": true
   }
