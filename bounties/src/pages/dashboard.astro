@@ -153,7 +153,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
         {authError && <p class="msg err">{authError}</p>}
       </section>
     ) : (
-      <>
+      <div class="page">
         <div class="dash-head">
           <div>
             <div class="label">Admin</div>
@@ -253,11 +253,12 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
 
         <div id="toast" class="toast" hidden></div>
         <script type="application/json" id="roster-data" set:html={exportJson} />
-      </>
+      </div>
     )
   }
 
   <style>
+    .page { padding-top: 26px; padding-bottom: 40px; }
     .login { max-width: 380px; margin: 80px auto; display: grid; gap: 14px; }
     .login form { display: grid; gap: 10px; }
     .login input { padding: 11px 13px; border: 1px solid var(--pill-border); border-radius: var(--r-xs); font: inherit; background: var(--card); color: var(--ink); }
@@ -280,7 +281,9 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
     .sec-head h2 { font-family: var(--display); font-size: 20px; margin: 0; }
     .sec-head .n { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
     .sec-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 10px 0 14px; border-bottom: 1px solid var(--divider); margin-bottom: 8px; }
-    .btn-sm { padding: 7px 11px; font-size: 12.5px; }
+    /* Base .btn is display:block/width:100% for full-width form buttons. Without
+       overriding that, every tool button stretched the whole card. */
+    .btn-sm { display: inline-block; width: auto; padding: 7px 11px; font-size: 12.5px; }
     .fld-sm { padding: 7px 10px; border: 1px solid var(--pill-border); border-radius: var(--r-xs); font: inherit; font-size: 12.5px; width: 170px; background: var(--card); color: var(--ink); }
     .fld-sm.wide { width: 260px; }
     .grp { padding: 8px 0; }
