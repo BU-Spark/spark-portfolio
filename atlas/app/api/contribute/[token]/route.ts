@@ -12,8 +12,16 @@ import { processImageUpload } from "@/lib/upload";
 import { deleteObject } from "@/lib/s3";
 import { checkRateLimit } from "@/lib/ratelimit";
 
+// CF-Connecting-IP first: on Workers it is set by the edge and cannot be forged.
+// X-Forwarded-For is appended to, not replaced, so its first entry is whatever
+// the client sent — using it as the key let one caller spread itself across
+// unlimited buckets. XFF stays as the fallback for local dev, off Cloudflare.
 function clientIp(req: Request): string {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "anon";
+  return (
+    req.headers.get("cf-connecting-ip")?.trim() ||
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    "anon"
+  );
 }
 
 // GET — current state for the uploader UI (images + status). 410 if the link is

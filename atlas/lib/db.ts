@@ -23,6 +23,8 @@ import {
   PROJECT_STATUSES,
   VISIBILITIES,
   BU_VISIBLE,
+  mergedVisibility,
+  type Visibility,
 } from "./data";
 import { deleteObject } from "./s3";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
@@ -879,7 +881,7 @@ export async function mergeProjects(
     // non-demoting rule as updateProject: a merge must not silently pull a live
     // project off the gallery, and it must never promote one onto it.
     const survivorVis = survivor.visibility ?? (survivor.published ? "internal" : "hidden");
-    const visibility = !published ? "hidden" : survivorVis === "public" ? "public" : "internal";
+    const visibility = mergedVisibility(survivorVis as Visibility, published);
     const contact = nz(survivor.contact) ?? nz(absorbed.contact);
 
     // Per-semester data combines automatically.
