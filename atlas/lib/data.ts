@@ -285,6 +285,28 @@ export const VISIBILITY_SHORT: Record<Visibility, string> = {
  */
 export const BU_VISIBLE: readonly Visibility[] = ["internal", "public"];
 
+/**
+ * The visibility a merged project keeps.
+ *
+ * A merge must never move a project ACROSS the audience line in either
+ * direction — not off the public gallery, and not onto it. `mergeProjects`
+ * used to decide this with `survivorVis === "public" ? "public" : "internal"`,
+ * which was written when `visibility` had three values. Once `restricted`
+ * existed, a restricted survivor stopped matching "public" and was rewritten to
+ * "internal" — publishing to every @bu.edu account a project that had been
+ * deliberately closed to exactly that audience. The `!published` escape did not
+ * catch it either, because `published` is stored as `visibility !== "hidden"`,
+ * so a restricted row carries `published = true`.
+ *
+ * Preserving the survivor's value is the whole rule. The one move allowed is
+ * the one the merge modal explicitly asked for: a hidden survivor that the
+ * resolution publishes becomes internal.
+ */
+export function mergedVisibility(survivorVis: Visibility, published: boolean): Visibility {
+  if (!published) return "hidden";
+  return survivorVis === "hidden" ? "internal" : survivorVis;
+}
+
 export const SPARK_PROJECTS: SeedProject[] = [
   {
     id: "boston-311-equity",

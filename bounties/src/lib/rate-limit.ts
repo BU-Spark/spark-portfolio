@@ -89,9 +89,24 @@ export function rateLimitResponse(result: RateLimitResult): Response {
   });
 }
 
-/** Extract client IP from request (works with proxies) */
+/**
+ * The client's IP, as a rate-limit bucket key.
+ *
+ * CF-Connecting-IP FIRST, and it is the only header here a client cannot forge:
+ * Cloudflare's edge sets it on every request. X-Forwarded-For is NOT a safe
+ * substitute — Cloudflare APPENDS the real IP to whatever the client already
+ * sent, so `split(',')[0]` returns an attacker-chosen value. Reading that first
+ * (which this did) meant a different bucket per request just by varying a
+ * header, so no limiter ever accumulated: the 5-per-5-minutes guard on the
+ * admin login was defeated exactly the way hackbu.dev's was, by a different
+ * route. See the note in dashboard.astro.
+ *
+ * XFF is kept only as a fallback for running outside Cloudflare (local dev),
+ * where there is no edge to set the trustworthy header and nothing to protect.
+ */
 export function getClientIp(request: Request): string {
   return (
+    request.headers.get('cf-connecting-ip')?.trim() ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     request.headers.get('x-real-ip') ||
     'unknown'
