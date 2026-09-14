@@ -37,6 +37,7 @@ export const ICONS = {
 export const GROUPS = [
   {
     title: "Programs",
+    blurb: "How students work with real clients — pick the one that matches your course or team.",
     links: [
       { title: "Practicum Projects", desc: "Semester-long builds for real clients — SE, DS, ML, UX", icon: "briefcase", href: "#" },
       { title: "Tech for Social Good", desc: "Civic-tech partnerships with nonprofits & government", icon: "heart", href: "#" },
@@ -45,6 +46,7 @@ export const GROUPS = [
   },
   {
     title: "For Students",
+    blurb: "Paid work, open roles, and the events where teams actually form.",
     links: [
       // ../bounties/ in this monorepo, live (once Cloudflare routes it) at
       // bounties.buspark.io. hackbu.buspark.io points at the same app's
@@ -56,6 +58,7 @@ export const GROUPS = [
   },
   {
     title: "Our Work",
+    blurb: "What BU students have shipped, and the code and stories behind it.",
     links: [
       // The one link with a real destination today: Atlas is this monorepo's
       // project portfolio, live (once deployed) at atlas.buspark.io.
@@ -66,6 +69,7 @@ export const GROUPS = [
   },
   {
     title: "Connect",
+    blurb: "For partners, press, and anyone who wants to bring us a project.",
     links: [
       { title: "bu.edu/spark", desc: "Official site — about us, staff, how to partner", icon: "globe", href: "https://www.bu.edu/spark/" },
       { title: "Partner With Spark!", desc: "Bring a project — for companies, labs & nonprofits", icon: "handshake", href: "#" },

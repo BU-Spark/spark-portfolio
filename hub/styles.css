@@ -204,3 +204,13 @@ a { color: var(--teal-dark); text-decoration: none; }
 @media (max-width: 640px) {
   .groups { grid-template-columns: 1fr; }
 }
+
+/* One line under each section heading. Sits between the heading and its links,
+   so it is sized to read as a caption, not a second heading. */
+.group-blurb {
+  margin: -2px 0 14px;
+  max-width: 46ch;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
