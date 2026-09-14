@@ -53,24 +53,26 @@
   //     --connection-string="postgresql://bounties_app:PASSWORD@altaria.proxy.rlwy.net:52027/railway" \
   //     --ca-certificate-id <id from the upload> --sslmode verify-ca
   //
-  // Then uncomment the block below with the returned Hyperdrive id. No code
-  // changes: src/lib/db.ts already prefers the binding over DATABASE_URL.
-  // Keep the DATABASE_URL secret set — it is what local dev uses.
+  // The id below is live. No code changes were needed: src/lib/db.ts already
+  // prefers the binding over DATABASE_URL.
   //
-  // A placeholder id is worse than nothing: wrangler hard-fails the deploy on
-  // an unknown Hyperdrive id, which is why this stays commented until the id
-  // exists.
+  // LOCAL DEV needs one extra step, because of that same preference. Under
+  // `astro dev` the binding exists and db.ts takes it, so the DATABASE_URL in
+  // .dev.vars is ignored; wrangler also refuses to start local emulation with
+  // no local connection string at all. Export a real dev database URL:
   //
-  // "hyperdrive": [
-  //   {
-  //     "binding": "HYPERDRIVE",
-  //     "id": "<id from `wrangler hyperdrive create`>",
-  //     // Required for DEPLOYS too, not just local dev, despite the name:
-  //     // wrangler calls getPlatformProxy() to read the env, which spins up
-  //     // miniflare, and miniflare cannot use a real Hyperdrive config.
-  //     "localConnectionString": "postgresql://placeholder:placeholder@127.0.0.1:5432/unused"
-  //   }
-  // ],
+  //   export CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=<dev db url>
+  //
+  // Do NOT add a placeholder "localConnectionString" here instead. It silences
+  // the startup error and then shadows DATABASE_URL, so every DB-backed page
+  // fails against an address nothing is listening on. Deploys never need it:
+  // the wrangler check is gated on local emulation.
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "0e0e6b931a654f4f8ebc183eb0ef0bc7"
+    }
+  ],
   // Secrets are NOT set here — use `wrangler secret put`:
   //   DATABASE_URL           (required; see the note above)
   //   EVENTBRITE_TOKEN
