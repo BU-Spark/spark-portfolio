@@ -262,7 +262,13 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { m
     .login form { display: grid; gap: 10px; }
     .login input { padding: 11px 13px; border: 1px solid var(--pill-border); border-radius: var(--r-xs); font: inherit; background: var(--card); color: var(--ink); }
     .dash-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
-    .dash-actions { display: flex; gap: 8px; }
+    /* The base .btn is display:block/width:100% because it is designed for the
+       full-width buttons in forms. Left alone here, each action stretches and
+       "Log out" wraps mid-word inside its <form>, which is what made the header
+       look broken. Size these to their text and forbid the wrap. */
+    .dash-actions { display: flex; gap: 8px; align-items: center; }
+    .dash-actions > * { flex: 0 0 auto; }
+    .dash-actions .btn { width: auto; white-space: nowrap; padding-left: 16px; padding-right: 16px; }
     .alert { background: var(--diff-advanced-wash); border: 1px solid var(--diff-advanced); color: var(--ink); border-radius: var(--r-sm); padding: 12px 14px; margin-bottom: 18px; font-size: 14px; }
     .alert code { display: block; margin-top: 6px; font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
     .dash-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 30px; }
