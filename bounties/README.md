@@ -279,7 +279,22 @@ npm run check    # astro type check
 ```
 
 
-## Slack: one `/spark` command
+## Slack: one `/spark` command — OPTIONAL, not registered
+
+**This is not a setup step and nothing is waiting on it.** The code is written,
+tested and its secret is set, but the slash command has deliberately NOT been
+registered in Slack, because `/dashboard` already does everything it does and
+more: per-bounty rosters, teams, looking-for-team, live stats and a CSV export.
+
+What Slack adds over the dashboard is convenience, not capability — no password
+to hand around, and a copy-paste address line that beats exporting a CSV to
+email six people. Register it if someone actually asks "who signed up for X" in
+the channel; it is a two-minute job and the steps are below. Until then the
+endpoint is inert: it rejects anything without a valid signature from that
+specific Slack app.
+
+The one reason to do it sooner is the open question below — if this bot is
+meant to grow past the bounty board, registering now is what starts that.
 
 Per langdon: a full bot, not a collection of one-off commands. A single Slack
 command with subcommands, backed by one route
@@ -295,7 +310,7 @@ Adding a capability is one entry in that file's HANDLERS map — no new Slack
 command to register, no re-approval, and signature verification stays in one
 place. `list` and `who` are aliases, because people guess them.
 
-Setup (api.slack.com/apps -> your app):
+Setup, if and when it is wanted (api.slack.com/apps -> your app):
 
 1. **Slash Commands** -> Create New Command
    - Command: `/spark`
