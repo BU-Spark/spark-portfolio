@@ -8,7 +8,7 @@
  * Railway's self-signed TCP proxy cannot present.
  */
 import assert from 'node:assert/strict';
-import { stripSslMode } from './db.ts';
+import { stripSslMode, clientOptions } from './db.ts';
 
 const HOST = 'postgresql://u:p@altaria.proxy.rlwy.net:52027/railway';
 let failed = 0;
@@ -59,5 +59,36 @@ check('a password containing reserved characters survives', () => {
   assert.ok(!out.includes('sslmode'));
 });
 
+// --- TLS selection -----------------------------------------------------------
+// Regression: the dashboard read "Database unreachable — The server does not
+// support SSL connections" the moment the Hyperdrive binding went live. TLS was
+// picked by testing the host for localhost, so a Hyperdrive host (neither local
+// nor Railway) was handed an ssl option it must never get.
+
+check('Hyperdrive must NOT request TLS -- it makes its own to the origin', () => {
+  const hd = clientOptions({ url: 'postgresql://u:p@abc.hyperdrive.local:5432/db', viaHyperdrive: true });
+  assert.equal(hd.ssl, undefined);
+  assert.equal(hd.connectionString, 'postgresql://u:p@abc.hyperdrive.local:5432/db');
+});
+
+check('a direct Railway connection still gets TLS with an unverified chain', () => {
+  assert.deepEqual(clientOptions({ url: HOST, viaHyperdrive: false }).ssl, { rejectUnauthorized: false });
+});
+
+check('sslmode is stripped on the direct path', () => {
+  const o = clientOptions({ url: `${HOST}?sslmode=require`, viaHyperdrive: false });
+  assert.ok(!o.connectionString.includes('sslmode'));
+});
+
+check('a local socket has no TLS', () => {
+  assert.equal(clientOptions({ url: 'postgresql://u:p@127.0.0.1:5432/db', viaHyperdrive: false }).ssl, undefined);
+});
+
+check('a local-LOOKING string from the binding is still the binding', () => {
+  // The exact shape of the original bug, inverted: origin decides, not hostname.
+  assert.equal(clientOptions({ url: 'postgresql://u:p@127.0.0.1:5432/db', viaHyperdrive: true }).ssl, undefined);
+});
+
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);
+

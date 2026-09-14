@@ -18,11 +18,18 @@ type RuntimeLocals = {
   runtime?: { env?: { HYPERDRIVE?: HyperdriveBinding; DATABASE_URL?: string } };
 };
 
-function resolveConnectionString(locals?: unknown): string {
+/**
+ * Where a connection string came from. This matters because it decides TLS:
+ * see `clientOptions`. Returning it beats re-deriving it from the URL, which is
+ * what caused the bug that comment describes.
+ */
+export type Resolved = { url: string; viaHyperdrive: boolean };
+
+function resolveConnectionString(locals?: unknown): Resolved {
   const runtimeEnv = (locals as RuntimeLocals | undefined)?.runtime?.env;
 
   const hyperdrive = runtimeEnv?.HYPERDRIVE?.connectionString;
-  if (hyperdrive) return hyperdrive;
+  if (hyperdrive) return { url: hyperdrive, viaHyperdrive: true };
 
   const direct =
     // `wrangler secret put DATABASE_URL` and .dev.vars BOTH land here, not in
@@ -39,7 +46,35 @@ function resolveConnectionString(locals?: unknown): string {
         'host, not *.railway.internal, which only resolves inside Railway.'
     );
   }
-  return direct;
+  return { url: direct, viaHyperdrive: false };
+}
+
+/**
+ * Connection options for `pg`, and specifically whether to ask for TLS.
+ *
+ * THREE cases, and the middle one is the one that bites:
+ *
+ *   1. Hyperdrive binding  -> NO TLS. The binding hands back a connection
+ *      string for a socket local to the Worker; Hyperdrive makes its own TLS
+ *      connection to Railway. Asking for TLS here gets "The server does not
+ *      support SSL connections" and takes every DB-backed page down with it.
+ *   2. Direct to Railway   -> TLS, unverified chain. The TCP proxy presents a
+ *      self-signed certificate: traffic is encrypted, the chain is not checked.
+ *   3. Direct to localhost -> no TLS.
+ *
+ * This used to key on whether the host looked local (`/localhost|127\.0\.0\.1/`),
+ * which silently put case 1 into case 2 — a Hyperdrive host is neither local
+ * nor Railway. The origin of the string is the fact that matters, so it is
+ * passed in rather than guessed at.
+ */
+export function clientOptions({ url, viaHyperdrive }: Resolved): {
+  connectionString: string;
+  ssl?: { rejectUnauthorized: boolean };
+} {
+  if (viaHyperdrive) return { connectionString: url };
+  const isLocal = /localhost|127\.0\.0\.1/.test(url);
+  if (isLocal) return { connectionString: url };
+  return { connectionString: stripSslMode(url), ssl: { rejectUnauthorized: false } };
 }
 
 /**
@@ -77,16 +112,7 @@ export function stripSslMode(url: string): string {
  * Pass the API route's `locals` so the Hyperdrive binding can be found.
  */
 export async function withDb<T>(locals: unknown, fn: (db: Client) => Promise<T>): Promise<T> {
-  const raw = resolveConnectionString(locals);
-  const isLocal = /localhost|127\.0\.0\.1/.test(raw);
-  const connectionString = isLocal ? raw : stripSslMode(raw);
-  const client = new Client({
-    connectionString,
-    // Railway's public Postgres endpoint requires TLS; a local socket doesn't.
-    // rejectUnauthorized: false because the TCP proxy presents a self-signed
-    // cert — traffic is encrypted, the certificate chain is not verified.
-    ssl: isLocal ? undefined : { rejectUnauthorized: false },
-  });
+  const client = new Client(clientOptions(resolveConnectionString(locals)));
   await client.connect();
   try {
     return await fn(client);
