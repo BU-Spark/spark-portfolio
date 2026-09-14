@@ -12,18 +12,48 @@ behind Hyperdrive.
 This answers the "are b & d, and c & e, the same thing?" question from the
 planning thread. **They are the same application**, addressed twice:
 
-| Hostname | Serves | What it is | State |
-|---|---|---|---|
-| `bounties.buspark.io/` | `src/pages/index.astro` | the whole board, every track | **live** — `routes` in `wrangler.jsonc` |
-| `hackbu.buspark.io/` | `/tracks/hackbu`, from `src/pages/tracks/[track].astro` | the HackBU track's front door | **not wired yet** |
+| Hostname | Serves | What it is |
+|---|---|---|
+| `bounties.buspark.io/` | `src/pages/index.astro` | the whole board, every track |
+| `hackbu.buspark.io/` | `/tracks/hackbu`, from `src/pages/tracks/[track].astro` | the HackBU track's front door |
 
-`hackbu.buspark.io` needs more than a DNS entry. Nothing in `src/` reads the
-`Host` header, so pointing the hostname at this Worker as a plain custom domain
-would serve the whole board there, not the HackBU page. It needs either a
-Cloudflare rewrite rule (`hackbu.buspark.io/` → `/tracks/hackbu`) or a small
-piece of Astro middleware doing the same. Until one exists the hostname is
-intentionally absent from `wrangler.jsonc` — a missing page is a better failure
-than a wrong one.
+Both are `custom_domain` entries in `wrangler.jsonc`, so wrangler creates the
+DNS records itself — there is no dashboard step and no Cloudflare rewrite rule.
+
+### How the track hostname works, and the trap in it
+
+`src/middleware.ts` reads the `Host` header and, for the ROOT path only, answers
+with that track's prerendered page from the asset binding. `src/lib/hostname.ts`
+holds the mapping as a pure function (`hackbu.buspark.io` → `hackbu`, matched on
+the first label so ports, case and preview spellings all work), covered by
+`src/lib/hostname.test.ts`.
+
+Only `/` is remapped. `hackbu.buspark.io/bounties/<slug>` is still that bounty
+and `/api/*` works under either name, so nothing has to know which hostname it
+was reached by.
+
+**`src/pages/index.astro` sets `prerender = false`, and that is load-bearing.**
+Under `output: 'hybrid'` the generated worker answers a prerendered path
+straight from `env.ASSETS` and never enters the Astro app, so middleware cannot
+see it. While `/` was prerendered this mapping was unreachable code that looked
+correct. Re-prerendering that page silently breaks `hackbu.buspark.io` while
+every build, test and typecheck stays green.
+
+The response is rebuilt rather than passed through because an asset response is
+immutable, and it carries `Vary: Host` — the same URL now returns different
+bodies per hostname, and without that header a cache in front of the Worker
+could serve the board to HackBU visitors.
+
+### Testing a hostname locally
+
+`wrangler dev` **overrides the `Host` header** with the first configured route,
+so `curl -H "Host: hackbu.buspark.io"` silently tests the wrong thing — it will
+return the board and look like the mapping is broken. Use the flag instead:
+
+```bash
+npx wrangler dev --host hackbu.buspark.io   # serves the HackBU page at /
+npx wrangler dev --host bounties.buspark.io # serves the board at /
+```
 
 `/tracks/<id>` exists for exactly this reason: a track can have its own
 hostname, heading, and blurb without being a second codebase. The other tracks

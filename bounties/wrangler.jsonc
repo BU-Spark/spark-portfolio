@@ -79,15 +79,22 @@
   // makes wrangler create the DNS record, the same way atlas.buspark.io is set
   // up, so this needs no dashboard step.
   //
-  // hackbu.buspark.io is deliberately NOT here. It has to serve /tracks/hackbu
-  // rather than the board root, and nothing in src/ reads the Host header — a
-  // custom_domain would just serve the full board under a second name. That
-  // mapping needs a Cloudflare rewrite rule (or Astro middleware), so adding
-  // the hostname before either exists would ship a wrong page, not a missing
-  // one. See README.md § "Hostnames".
+  // hackbu.buspark.io serves /tracks/hackbu, not the board root. That mapping
+  // lives in src/middleware.ts (with src/lib/hostname.ts), which is why this
+  // hostname can be a plain custom_domain: the Worker decides what to serve
+  // from the Host header, so no Cloudflare rewrite rule is involved.
+  //
+  // It only works because src/pages/index.astro sets `prerender = false`. A
+  // prerendered `/` is answered from the asset binding without entering the
+  // Astro app, so middleware never sees it. Re-prerendering that page breaks
+  // this hostname while every build stays green — see the note there.
   "routes": [
     {
       "pattern": "bounties.buspark.io",
+      "custom_domain": true
+    },
+    {
+      "pattern": "hackbu.buspark.io",
       "custom_domain": true
     }
   ],

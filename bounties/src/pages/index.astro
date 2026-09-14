@@ -1,4 +1,11 @@
 ---
+// NOT prerendered, so that src/middleware.ts runs for `/`. Under `output:
+// 'hybrid'` the generated worker answers a prerendered path straight from the
+// asset binding and never enters the Astro app, so middleware cannot see it —
+// which is what hackbu.buspark.io/ needs in order to serve its track page.
+// Reverting this silently breaks that hostname while every build stays green.
+export const prerender = false;
+
 import { getCollection } from 'astro:content';
 import Site from '../layouts/Site.astro';
 import { dueLabel, effectiveStatus } from '../lib/deadline';
