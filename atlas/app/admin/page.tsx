@@ -21,17 +21,6 @@ const PROJECTS_CACHE_KEY = "spark:admin:projects:v1";
 // `superOnly` entries are filtered out for scoped admins, matching AdminRail:
 // /admin/settings and /admin/users are requireSuper at the API, so leaving them
 // linked here would hand a CDS or Spark admin a pair of guaranteed dead ends.
-const ALL_SECTIONS: { label: string; href: string; desc: string; superOnly?: boolean }[] = [
-  { label: "Projects", href: "/admin/projects", desc: "Browse & edit the catalog" },
-  { label: "People", href: "/admin/people", desc: "Directory & per-semester roles" },
-  { label: "Approvals", href: "/admin/approvals", desc: "Everything waiting on you" },
-  { label: "Inbox", href: "/admin/inbox", desc: "Triage imported rows" },
-  { label: "Media", href: "/admin/uploads", desc: "Review image uploads" },
-  { label: "Bulk uploads", href: "/admin/bulk-uploads", desc: "Outreach upload links" },
-  { label: "Import CSV", href: "/admin/import", desc: "Bulk data import" },
-  { label: "Settings", href: "/admin/settings", desc: "Taxonomy & facets", superOnly: true },
-  { label: "Manage admins", href: "/admin/users", desc: "Add or remove admins", superOnly: true },
-];
 
 export default function AdminDashboardPage() {
   const actor = useActor();
@@ -39,6 +28,8 @@ export default function AdminDashboardPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  // A failed counter must not render as a real zero — see refreshCounts.
+  const [countsError, setCountsError] = useState(false);
   const [inboxCount, setInboxCount] = useState(0);
   const [pendingUploads, setPendingUploads] = useState(0);
   const [peopleCount, setPeopleCount] = useState<number | null>(null);
@@ -70,23 +61,25 @@ export default function AdminDashboardPage() {
     setLoading(false);
   }, []);
 
+  // Each counter reports its own failure. Previously every one of these swallowed
+  // its error and left the tile at its initial 0, so a DB blip looked exactly like
+  // an empty queue — on the page whose job is telling you what needs attention.
+  // refresh() above already got this right; these three never did.
   const refreshCounts = useCallback(async () => {
-    await Promise.allSettled([
+    const results = await Promise.allSettled([
       fetch("/api/inbox")
-        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
         .then((d) => {
           if (d?.count != null) setInboxCount(d.count);
-        })
-        .catch(() => {}),
+        }),
       fetch("/api/upload-requests?status=submitted")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => setPendingUploads(d?.requests?.length ?? 0))
-        .catch(() => {}),
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d) => setPendingUploads(d?.requests?.length ?? 0)),
       fetch("/api/people")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => setPeopleCount(d?.people?.length ?? 0))
-        .catch(() => {}),
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+        .then((d) => setPeopleCount(d?.people?.length ?? 0)),
     ]);
+    setCountsError(results.some((r) => r.status === "rejected"));
   }, []);
 
   useEffect(() => {
@@ -158,7 +151,7 @@ export default function AdminDashboardPage() {
       </>),
     },
     {
-      key: "bulk", title: "Bulk uploads", href: "/admin/bulk-uploads",
+      key: "bulk", title: "Bulk uploads", href: "/admin/uploads?tab=bulk",
       count: null, descriptor: "Outreach links", solidR: 130,
       from: "oklch(0.70 0.15 25)", to: "oklch(0.52 0.16 25)",
       icon: (<>
@@ -195,7 +188,7 @@ export default function AdminDashboardPage() {
         </Link>
       </div>
 
-      {loadError && (
+      {(loadError || countsError) && (
         <div
           className="card"
           style={{
@@ -204,36 +197,15 @@ export default function AdminDashboardPage() {
           }}
         >
           <div style={{ flex: 1, minWidth: 200, color: "var(--amber-ink)", fontSize: 13.5 }}>
-            Couldn&apos;t load catalog stats — counts may be stale.
+            {loadError
+              ? "Couldn't load the catalog — the list and its counts may be stale."
+              : "Couldn't load some counts — the tiles showing 0 may not really be 0."}
           </div>
           <button type="button" onClick={() => { refresh(); refreshCounts(); }} className="btn btn-dark" style={{ flexShrink: 0 }}>
             Retry
           </button>
         </div>
       )}
-
-      {/* ── All sections (every admin page is reachable from here) ── */}
-      <section className="card" style={{ overflow: "hidden", marginBottom: 8 }}>
-        <div style={{ padding: "16px 22px 13px", borderBottom: "1px solid var(--rowsep)", fontFamily: "var(--display)", fontWeight: 700, fontSize: 16 }}>
-          All sections
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 1, background: "var(--rowsep)" }}>
-          {ALL_SECTIONS.filter((s) => !s.superOnly || actor?.isSuper).map((s) => (
-            <Link
-              key={s.href}
-              href={s.href}
-              className="spark-row"
-              style={{ display: "block", padding: "14px 20px", background: "#fff", textDecoration: "none" }}
-            >
-              <div style={{ fontFamily: "var(--display)", fontWeight: 600, fontSize: 14.5, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
-                {s.label}
-                <span style={{ color: ACCENT, fontFamily: "var(--mono)", fontSize: 11.5 }}>→</span>
-              </div>
-              <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)", marginTop: 5 }}>{s.desc}</div>
-            </Link>
-          ))}
-        </div>
-      </section>
 
       {/* ── Wheel hero — no card; breaks out of the 1080px column and scales up 1.5×.
           Negative margins crop the wheel's large transparent top/bottom dead space. ── */}

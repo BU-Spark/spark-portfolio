@@ -54,7 +54,6 @@ export default function AdminRail() {
   const pathname = usePathname() || "";
   const [inboxCount, setInboxCount] = useState(0);
   const [approvalCount, setApprovalCount] = useState(0);
-  const [suggestionCount, setSuggestionCount] = useState(0);
   const actor = useActor();
 
   useEffect(() => {
@@ -67,13 +66,6 @@ export default function AdminRail() {
     fetch("/api/approvals", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (Array.isArray(d?.items)) setApprovalCount(d.items.length);
     }).catch(() => {});
-    // Community suggestions. A review queue nobody is prompted to visit is a queue
-    // that silently fills up, which is exactly what happened to this feature between
-    // shipping the API and shipping this badge.
-    fetch("/api/suggestions?status=pending", { signal: ac.signal })
-      .then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (Array.isArray(d?.suggestions)) setSuggestionCount(d.suggestions.length);
-      }).catch(() => {});
     return () => ac.abort();
   }, []);
 
@@ -90,9 +82,10 @@ export default function AdminRail() {
       { href: "/admin/approvals", label: "Approvals", icon: "approvals", badge: approvalCount },
       { href: "/admin/inbox", label: "Import inbox", icon: "inbox", badge: inboxCount },
       { href: "/admin/import", label: "Import CSV", icon: "import" },
-      { href: "/admin/suggestions", label: "Suggestions", icon: "approvals", badge: suggestionCount },
+      // Suggestions are rows in the Approvals queue now, and Bulk uploads is a tab
+      // of Uploads — both were separate entries pointing at work that already had
+      // a home, which is how this rail reached eleven items.
       { href: "/admin/uploads", label: "Uploads", icon: "media" },
-      { href: "/admin/bulk-uploads", label: "Bulk uploads", icon: "bulk" },
     ]},
     // Hidden rather than disabled for non-supers: both pages are super-only at the
     // API, so they'd be dead ends. "Import CSV" stays visible for everyone — it's

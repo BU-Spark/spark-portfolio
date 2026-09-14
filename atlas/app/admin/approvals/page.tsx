@@ -2,7 +2,8 @@
 // Escalation queue — one page for everything waiting on a person, oldest first.
 //
 // Consolidates what was previously spread across /admin/inbox (tracker rows),
-// /admin/uploads (screenshot approvals) and the drafts tab of /admin/projects. Each
+// /admin/uploads (screenshot approvals), /admin/suggestions (community offers) and
+// the drafts tab of /admin/projects. Each
 // row still ACTS on its own page; this is the "what needs me today" view, so it
 // links out rather than duplicating the triage UI.
 //
@@ -36,7 +37,7 @@ const KINDS: Record<
   },
   nudge: {
     label: "Waiting on a PM",
-    href: () => "/admin/bulk-uploads",
+    href: () => "/admin/uploads?tab=bulk",
     cta: "Chase",
   },
   inbox: {
@@ -48,6 +49,11 @@ const KINDS: Record<
     label: "Drafts not yet published",
     href: (ref) => `/admin/edit/${encodeURIComponent(ref)}`,
     cta: "Open",
+  },
+  suggestion: {
+    label: "Community suggestions",
+    href: () => "/admin/suggestions",
+    cta: "Review",
   },
 };
 
