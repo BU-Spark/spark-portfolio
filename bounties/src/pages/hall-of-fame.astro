@@ -52,6 +52,7 @@ for (const e of entries) {
 // for the same slug — the database is where declarations are made now.
 // Fails soft: a public page should degrade to the legacy list, not to an
 // infrastructure error. The dashboard is where an unreachable DB is loud.
+let degraded = false;
 try {
   const rows = await withDb(Astro.locals, hallOfFame);
   for (const r of rows) {
@@ -70,6 +71,12 @@ try {
     });
   }
 } catch (err) {
+  // Fails soft by design — but NOT silently. Anyone declared a winner through the
+  // dashboard exists only in Postgres, so an outage erases them from a page whose
+  // whole claim is "names are permanent", leaving a list that looks complete and
+  // is merely missing the most recent people. The banner is the difference between
+  // "no winners yet" and "we cannot see the winners right now".
+  degraded = true;
   console.error(
     'Hall of Fame: database unreachable, showing legacy entries only:',
     err instanceof Error ? err.message : err
@@ -92,8 +99,14 @@ const total = list.reduce((sum, i) => sum + i.prize, 0);
       <h1>They shipped. <em class="gold">They claimed.</em></h1>
       <p>
         Every completed bounty and the builder behind it. Names are permanent.
-        {total > 0 && <> ${total.toLocaleString('en-US')} paid out so far.</>}
+        {!degraded && total > 0 && <> ${total.toLocaleString('en-US')} paid out so far.</>}
       </p>
+      {degraded && (
+        <p class="hof-degraded" role="status">
+          This list is incomplete — recent winners could not be loaded just now.
+          Nobody has been removed; please check back shortly.
+        </p>
+      )}
     </div>
     <!-- decorative: the heading already says what this page is -->
     <svg class="trophy" viewBox="0 0 160 200" aria-hidden="true">
