@@ -36,6 +36,7 @@ const card = (l) => {
 
 const group = (g) => `      <section class="group" aria-labelledby="grp-${esc(g.title.toLowerCase().replace(/[^a-z]+/g, "-"))}">
         <h2 class="group-title" id="grp-${esc(g.title.toLowerCase().replace(/[^a-z]+/g, "-"))}">${esc(g.title)}</h2>
+${g.blurb ? `        <p class="group-blurb">${esc(g.blurb)}</p>\n` : ""}
 ${g.links.map(card).join("\n")}
       </section>`;
 
