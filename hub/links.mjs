@@ -73,7 +73,7 @@ export const GROUPS = [
     links: [
       { title: "bu.edu/spark", desc: "Official site — about us, staff, how to partner", icon: "globe", href: "https://www.bu.edu/spark/" },
       { title: "Partner With Spark!", desc: "Bring a project — for companies, labs & nonprofits", icon: "handshake", href: "#" },
-      { title: "Community Discord", desc: "Where teams form and questions get answered", icon: "discord", href: "#" },
+      { title: "Community Discord", desc: "Where teams form and questions get answered", icon: "discord", href: "https://discord.gg/DXuHeHKRq" },
     ],
   },
 ];
