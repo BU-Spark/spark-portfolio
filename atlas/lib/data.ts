@@ -99,9 +99,13 @@ export const DEFAULT_GALLERY_SETTINGS: GallerySettings = {
     heading: "Student-built projects, with real partners and real impact.",
     body: "Browse work from our practicums, and co-labs — searchable by discipline, program, partner, and the technologies behind each build.",
   },
+  // Both off: the counts read from what is PUBLIC, and the gallery is opt-in, so
+  // they currently announce a number far below the real body of work. Toggled
+  // per-stat in admin Settings whenever the opt-in backlog has been worked
+  // through — the text and metric are kept so turning them back on is one click.
   heroStats: [
-    { show: true, metric: "projects", text: "projects since 2019" },
-    { show: true, metric: "students", text: "student experiences" },
+    { show: false, metric: "projects", text: "projects since 2024" },
+    { show: false, metric: "students", text: "student experiences" },
   ],
 };
 
