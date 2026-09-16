@@ -9,6 +9,7 @@ import {
   removeUploadRequestImage,
 } from "@/lib/db";
 import { processImageUpload } from "@/lib/upload";
+import { S3ConfigError } from "@/lib/s3";
 import { deleteObject } from "@/lib/s3";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -68,7 +69,21 @@ export async function POST(
     return Response.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const result = await processImageUpload(dataUrl);
+  // A missing R2_* secret throws rather than returning a result — see lib/s3.ts,
+  // where that is deliberate so a misconfiguration breaks only image operations.
+  // Uncaught it surfaced as a blank 500 with the diagnosis (which names the exact
+  // missing variables) visible nowhere. 503: the request was fine, the service is
+  // not configured.
+  let result;
+  try {
+    result = await processImageUpload(dataUrl);
+  } catch (e) {
+    if (e instanceof S3ConfigError) {
+      console.error("Upload failed:", e.message);
+      return Response.json({ error: e.message }, { status: 503 });
+    }
+    throw e;
+  }
   if (!result.ok) {
     return Response.json({ error: result.error }, { status: result.status });
   }
