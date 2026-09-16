@@ -60,7 +60,28 @@
   //
   // NEXTAUTH_URL is listed for that reason alone. auth.config.ts sets
   // `trustHost: true`, so Auth.js derives the URL from the request and doesn't need
-  // it; it's here so deploying doesn't quietly delete a variable someone set by hand.
+  // it. It was originally here to stop a deploy deleting a hand-set variable —
+  // `keep_vars` above now covers that for every variable, so this entry survives
+  // as documentation of the value rather than as a workaround.
+  // Dashboard-set variables SURVIVE deploys.
+  //
+  // Without this, `wrangler deploy` deletes every var on the Worker and re-sets
+  // only what appears below — Wrangler treats this file as the source of truth,
+  // like a terraform plan. That is how the R2_* variables vanished minutes after
+  // they were added: they were set in the dashboard as plain Variables, and the
+  // next deploy wiped them. The failure is silent and arrives later, so it reads
+  // as "the rename didn't work" rather than "a deploy removed them".
+  //
+  // Trade-off, stated plainly: this file stops being authoritative for vars. A
+  // variable deleted here is no longer deleted from the Worker, so removing one
+  // for real means removing it in the dashboard too.
+  //
+  // Credentials should still be SECRETS rather than variables — a secret is
+  // write-only, while a variable is readable by anyone with dashboard access.
+  // keep_vars protects both kinds from being deleted; it does not make a plain
+  // variable a safe place for a key.
+  "keep_vars": true,
+
   "vars": {
     "NEXTAUTH_URL": "https://atlas.buspark.io",
     // Must be a Resend-verified domain. Unset, lib/email.ts falls back to Resend's
