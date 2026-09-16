@@ -1,4 +1,9 @@
-// S3-compatible object storage (Railway bucket). Server-only.
+// Object storage for project screenshots. Cloudflare R2 in production, reached
+// through the S3 API — R2 is S3-compatible, which is why this still uses
+// @aws-sdk/client-s3 while every variable is named R2_*. The names follow the
+// provider, not the protocol, so nobody has to guess which account a credential
+// belongs to (a Railway key against an R2 endpoint fails as a 403, not a clear
+// error). Server-only.
 import "server-only";
 import {
   S3Client,
@@ -24,30 +29,30 @@ function getClient(): S3Client {
     // Thrown here rather than at module load on purpose: this breaks only image
     // operations, instead of taking down every page that happens to import this file.
     const missing = (
-      ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const
+      ["R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] as const
     ).filter((k) => !process.env[k]);
     if (missing.length) {
       throw new S3ConfigError(
         `Object storage is not configured — missing ${missing.join(", ")}. ` +
-          `Set these as Worker secrets (S3_REGION is optional; it defaults to "auto").`
+          `Set these as Worker secrets (R2_REGION is optional; it defaults to "auto").`
       );
     }
     globalForS3.sparkS3 = new S3Client({
-      region: process.env.S3_REGION || "auto",
-      endpoint: process.env.S3_ENDPOINT,
+      region: process.env.R2_REGION || "auto",
+      endpoint: process.env.R2_ENDPOINT,
       // Path-style addressing is required by most S3-compatible providers
       // (MinIO / Railway) where the bucket isn't a DNS subdomain.
       forcePathStyle: true,
       credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY_ID || "",
-        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || "",
+        accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
       },
     });
   }
   return globalForS3.sparkS3;
 }
 
-const BUCKET = () => process.env.S3_BUCKET || "";
+const BUCKET = () => process.env.R2_BUCKET || "";
 
 export async function putObject(
   key: string,
@@ -79,7 +84,7 @@ export async function getObject(
     return { body, contentType: res.ContentType || "application/octet-stream" };
   } catch (e) {
     // A real miss returns null (the caller 404s). A CONFIG error must not be
-    // laundered into "not found" — that's how a missing S3_ENDPOINT turns into
+    // laundered into "not found" — that's how a missing R2_ENDPOINT turns into
     // "images are broken" with nothing to diagnose. Let it surface as a 500.
     if (e instanceof S3ConfigError) throw e;
     return null;
