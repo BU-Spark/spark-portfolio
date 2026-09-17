@@ -4,6 +4,7 @@
 // that hides itself on a missing file) lives in <MastheadLogo>.
 import Link from "next/link";
 import MastheadLogo from "@/components/MastheadLogo";
+import ProjectGallery from "@/components/ProjectGallery";
 import { courseLabel } from "@/lib/data";
 import { disciplineColor } from "@/lib/colors";
 import {
@@ -17,63 +18,6 @@ import { cleanBlurb } from "@/lib/gdocs";
 import type { Project } from "@/lib/types";
 
 const ACCENT = "#0fa392";
-
-function GalleryImage({
-  project,
-  index,
-  primary = false,
-}: {
-  project: Project;
-  index: number;
-  primary?: boolean;
-}) {
-  const color = disciplineColor(primaryDiscipline(project));
-  const radius = primary ? 10 : 7;
-  const url = project.images && project.images[index];
-
-  if (url) {
-    return (
-      <div
-        style={{
-          width: "100%",
-          aspectRatio: primary ? "16 / 9" : "4 / 3",
-          borderRadius: radius,
-          overflow: "hidden",
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={url}
-          alt={`${project.title} image ${index + 1}`}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-      </div>
-    );
-  }
-
-  // Striped discipline-tinted placeholder (no caption label).
-  const angle = 90 + ((index * 37 + project.id.length) % 4) * 30;
-  return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        aspectRatio: primary ? "16 / 9" : "4 / 3",
-        borderRadius: radius,
-        overflow: "hidden",
-        background: `repeating-linear-gradient(${angle}deg, color-mix(in oklab, ${color} ${18 - index * 2}%, #fff) 0 14px, color-mix(in oklab, ${color} 7%, #fff) 14px 28px)`,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background: `radial-gradient(120% 90% at ${20 + index * 20}% 12%, color-mix(in oklab, ${color} 26%, transparent), transparent 62%)`,
-        }}
-      />
-    </div>
-  );
-}
 
 // External-link glyph shown beside the client name when the org has a website.
 function LinkIcon() {
@@ -279,21 +223,15 @@ export default function ProjectView({ project }: { project: Project }) {
           ← Back to gallery
         </Link>
 
-        {/* Image gallery (no captions) */}
+        {/* Image gallery (no captions). Only real images get a tile, and each
+            one opens full size — see components/ProjectGallery. */}
         <div className="spark-detail-hero" style={{ marginBottom: 30 }}>
-          <GalleryImage project={project} index={0} primary />
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: 6,
-              marginTop: 6,
-            }}
-          >
-            {[1, 2, 3].map((i) => (
-              <GalleryImage key={i} project={project} index={i} />
-            ))}
-          </div>
+          <ProjectGallery
+            title={project.title}
+            images={project.images}
+            color={color}
+            seed={project.id.length}
+          />
         </div>
 
         <div
