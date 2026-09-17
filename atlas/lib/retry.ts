@@ -24,3 +24,31 @@ export async function connectOnceMore<T>(
     return connect();
   }
 }
+
+/**
+ * Is this statement safe to run twice?
+ *
+ * Only a plain SELECT is. The question matters because a statement that fails
+ * *after* reaching Postgres is ambiguous — an INSERT may have committed before
+ * the connection dropped — so replaying a write can apply it twice, while
+ * replaying a read cannot do anything but return the same rows.
+ *
+ * Conservative on purpose: leading comments are stripped, then the statement
+ * must BEGIN with SELECT or WITH and contain no data-modifying keyword anywhere.
+ * That last check is what makes `WITH x AS (INSERT ... RETURNING *) SELECT ...`
+ * — a writing CTE, which looks like a read — fall through to no-retry.
+ *
+ * Known ceiling: a SELECT calling a VOLATILE function that writes would be
+ * misclassified. None exist in this schema; if one is ever added, it must not
+ * be reached through query().
+ */
+export function isReadOnly(sql: string): boolean {
+  const stripped = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n]*/g, " ")
+    .trim();
+  if (!/^(select|with)\b/i.test(stripped)) return false;
+  return !/\b(insert|update|delete|merge|create|alter|drop|truncate|grant|revoke|call|do)\b/i.test(
+    stripped
+  );
+}
