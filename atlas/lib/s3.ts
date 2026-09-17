@@ -39,6 +39,18 @@ function getClient(): S3Client {
     }
     globalForS3.sparkS3 = new S3Client({
       region: process.env.R2_REGION || "auto",
+      // R2 does not implement the AWS flexible-checksum headers the SDK began
+      // adding by default in v3.729. Left on, PutObject crashes the Worker
+      // outright — Cloudflare error 1101, an uncaught exception that never
+      // reaches our try/catch — while GetObject is unaffected because the
+      // middleware only runs on writes. That asymmetry (reads fine, writes
+      // 1101) is what identified this.
+      //
+      // WHEN_REQUIRED keeps checksums for the operations that genuinely need
+      // them and omits them elsewhere, which is Cloudflare's documented setting
+      // for using the AWS SDK against R2.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
       endpoint: process.env.R2_ENDPOINT,
       // Path-style addressing is required by most S3-compatible providers
       // (MinIO / Railway) where the bucket isn't a DNS subdomain.
