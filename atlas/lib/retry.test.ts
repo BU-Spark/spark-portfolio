@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { connectOnceMore } from "./retry";
+import { connectOnceMore, isReadOnly } from "./retry";
 
 describe("connectOnceMore", () => {
   it("returns the first result without retrying", async () => {
@@ -31,5 +31,34 @@ describe("connectOnceMore", () => {
       .mockRejectedValueOnce(new Error("first"))
       .mockRejectedValue(new Error("second"));
     await expect(connectOnceMore(connect, undefined, 0)).rejects.toThrow("second");
+  });
+});
+
+describe("isReadOnly", () => {
+  it("accepts plain reads", () => {
+    expect(isReadOnly("SELECT * FROM projects")).toBe(true);
+    expect(isReadOnly("  select 1  ")).toBe(true);
+    expect(isReadOnly("WITH t AS (SELECT 1) SELECT * FROM t")).toBe(true);
+  });
+
+  it("rejects every write", () => {
+    expect(isReadOnly("INSERT INTO projects VALUES (1)")).toBe(false);
+    expect(isReadOnly("UPDATE projects SET title = 'x'")).toBe(false);
+    expect(isReadOnly("DELETE FROM projects")).toBe(false);
+    expect(isReadOnly("TRUNCATE projects")).toBe(false);
+  });
+
+  it("rejects a writing CTE, which reads as a SELECT but is not one", () => {
+    expect(
+      isReadOnly("WITH moved AS (DELETE FROM a RETURNING *) SELECT * FROM moved")
+    ).toBe(false);
+    expect(
+      isReadOnly("WITH n AS (INSERT INTO a VALUES (1) RETURNING id) SELECT * FROM n")
+    ).toBe(false);
+  });
+
+  it("is not fooled by a leading comment", () => {
+    expect(isReadOnly("-- fetch the roster\nSELECT * FROM people")).toBe(true);
+    expect(isReadOnly("/* cleanup */ DELETE FROM people")).toBe(false);
   });
 });

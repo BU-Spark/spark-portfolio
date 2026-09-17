@@ -27,7 +27,7 @@ import {
   type Visibility,
 } from "./data";
 import { deleteObject } from "./s3";
-import { connectOnceMore } from "./retry";
+import { connectOnceMore, isReadOnly } from "./retry";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
 import { ORGS, canEdit, canMerge, type Actor } from "./authz";
@@ -84,48 +84,73 @@ async function acquireClient(): Promise<{ client: DatabaseClient; release: () =>
   return { client, release: async () => client.release() };
 }
 
-export async function query<T = Record<string, unknown>>(
-  text: string,
-  params?: unknown[]
-): Promise<T[]> {
+function dbErrorFields(error: unknown) {
+  const e = error as {
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+    errno?: unknown;
+    syscall?: unknown;
+  };
+  return {
+    name: typeof e.name === "string" ? e.name : undefined,
+    message: typeof e.message === "string" ? e.message : undefined,
+    code: typeof e.code === "string" ? e.code : undefined,
+    errno: typeof e.errno === "string" ? e.errno : undefined,
+    syscall: typeof e.syscall === "string" ? e.syscall : undefined,
+  };
+}
+
+/** One attempt: connect (with its own connect-level retry) and run the statement. */
+async function runStatement<T>(text: string, params?: unknown[]): Promise<T[]> {
   let release: (() => Promise<void>) | undefined;
   try {
     // Retry the connection, not the statement — see lib/retry.ts for why
     // replaying a query that already reached Postgres is unsafe.
     const acquired = await connectOnceMore(acquireClient, (error) => {
-      const e = error as { name?: unknown; message?: unknown; code?: unknown };
-      console.warn("Postgres connect failed, retrying once", {
-        name: typeof e.name === "string" ? e.name : undefined,
-        message: typeof e.message === "string" ? e.message : undefined,
-        code: typeof e.code === "string" ? e.code : undefined,
-      });
+      console.warn("Postgres connect failed, retrying once", dbErrorFields(error));
     });
     release = acquired.release;
     const res = await acquired.client.query(text, params as never);
     return res.rows as T[];
-  } catch (error) {
-    // Cloudflare otherwise reports only pg-pool's rethrow frame. Keep this
-    // intentionally limited to connection/error metadata: query parameters and
-    // DATABASE_URL may contain customer data or credentials.
-    const dbError = error as {
-      name?: unknown;
-      message?: unknown;
-      code?: unknown;
-      errno?: unknown;
-      syscall?: unknown;
-    };
-    console.error("Postgres query failed", {
-      name: typeof dbError.name === "string" ? dbError.name : undefined,
-      message: typeof dbError.message === "string" ? dbError.message : undefined,
-      code: typeof dbError.code === "string" ? dbError.code : undefined,
-      errno: typeof dbError.errno === "string" ? dbError.errno : undefined,
-      syscall: typeof dbError.syscall === "string" ? dbError.syscall : undefined,
-    });
-    throw error;
   } finally {
     await release?.();
   }
 }
+
+export async function query<T = Record<string, unknown>>(
+  text: string,
+  params?: unknown[]
+): Promise<T[]> {
+  try {
+    return await runStatement<T>(text, params);
+  } catch (error) {
+    // A statement can fail AFTER reaching Postgres — a dropped connection
+    // mid-query, an origin-side pool hiccup. Connect-level retry does not see
+    // that, which is why the magic-link upload still 500'd on its very first
+    // SELECT and then worked on retry.
+    //
+    // Replaying is only safe for a pure read: a write that failed after
+    // committing would apply twice. isReadOnly() is deliberately conservative,
+    // and anything it is unsure about is treated as a write.
+    if (isReadOnly(text)) {
+      console.warn("Postgres read failed, retrying once", dbErrorFields(error));
+      try {
+        return await runStatement<T>(text, params);
+      } catch (second) {
+        console.error("Postgres query failed", dbErrorFields(second));
+        throw second;
+      }
+    }
+    // A write, or anything isReadOnly() would not vouch for: report and rethrow
+    // without replaying. Logged here because Cloudflare otherwise shows only
+    // pg's rethrow frame, and deliberately limited to connection/error metadata
+    // — query parameters and DATABASE_URL may carry customer data or credentials.
+    console.error("Postgres query failed", dbErrorFields(error));
+    throw error;
+  }
+}
+
 
 // Turn a stored image key into a servable URL. Full URLs pass through; bare
 // keys are served via the cached /api/img proxy so the bucket can stay private.
