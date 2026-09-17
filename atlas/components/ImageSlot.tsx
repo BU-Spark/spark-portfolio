@@ -6,21 +6,30 @@
 import { useCallback, useId, useRef, useState } from "react";
 import { keyToUrl } from "@/lib/imageClient";
 
-const MAX_DIM = 1200;
+// Long-edge cap for the STORED image. This is the display size on a project
+// page, not the size of the slot it was dropped into — a screenshot is viewed
+// full-size in the lightbox, and 1200 was visibly soft for one containing UI
+// text. WebP at 0.9 keeps a 2000px screenshot well inside the 6MB request cap.
+const MAX_DIM = 2000;
+const QUALITY = 0.9;
 const ACCEPT = ["image/png", "image/jpeg", "image/webp", "image/avif"];
 
-async function toDataUrl(file: File, targetW: number): Promise<string> {
+async function toDataUrl(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
   try {
-    const cap = Math.min(MAX_DIM, Math.max(1, Math.round(targetW * 2)) || MAX_DIM);
-    const scale = Math.min(1, cap / Math.max(bitmap.width, bitmap.height));
+    // Previously the cap was twice the slot's RENDERED width, so the stored
+    // resolution depended on the uploader's window size: a ~300px thumbnail
+    // slot stored a 600px image, which was then shown as a 16:9 hero and in
+    // the lightbox. Same upload, different quality per browser — and never
+    // more than half of what the page needed.
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
     const w = Math.max(1, Math.round(bitmap.width * scale));
     const h = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
     canvas.getContext("2d")!.drawImage(bitmap, 0, 0, w, h);
-    return canvas.toDataURL("image/webp", 0.85);
+    return canvas.toDataURL("image/webp", QUALITY);
   } finally {
     bitmap.close?.();
   }
@@ -61,8 +70,7 @@ export default function ImageSlot({
         return;
       }
       try {
-        const w = hostRef.current?.clientWidth || MAX_DIM;
-        const dataUrl = await toDataUrl(file, w);
+        const dataUrl = await toDataUrl(file);
         setPreview(dataUrl); // instant preview while uploading
         setUploading(true);
         const res = await fetch(endpoint, {
@@ -203,6 +211,9 @@ export default function ImageSlot({
           <span style={{ fontSize: 11 }}>
             or <u style={{ textUnderlineOffset: 2 }}>browse files</u>
           </span>
+          {/* The downscale is irreversible, so the target size belongs on the
+              drop target itself rather than only in the surrounding copy. */}
+          <span style={{ fontSize: 10.5, opacity: 0.7 }}>PNG/JPEG/WebP · 1600px+ wide · max 6MB</span>
           <span
             aria-hidden
             style={{

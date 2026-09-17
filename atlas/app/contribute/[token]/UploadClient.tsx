@@ -125,11 +125,36 @@ export default function UploadClient({
           {projectBlurb}
         </p>
       )}
-      <p style={{ fontSize: 13.5, color: "#6a6f74", lineHeight: 1.5, margin: "0 0 18px" }}>
-        Upload up to {CAP} screenshots of this project (PNG, JPEG, or WebP). When you&rsquo;re done,
-        hit <strong>Submit for review</strong> — a BU Spark! admin will publish them. No account needed,
+      <p style={{ fontSize: 13.5, color: "#6a6f74", lineHeight: 1.5, margin: "0 0 12px" }}>
+        Upload up to {CAP} screenshots of this project. When you&rsquo;re done, hit{" "}
+        <strong>Submit for review</strong> — a BU Spark! admin will publish them. No account needed,
         and you can share this link with a teammate.
       </p>
+
+      {/* Stated up front because the downscale is irreversible: a 700px-wide
+          screenshot cannot be sharpened later, and the first sign of it is a
+          soft image on the public project page. */}
+      <ul
+        style={{
+          fontSize: 13,
+          color: "#6a6f74",
+          lineHeight: 1.6,
+          margin: "0 0 18px",
+          paddingLeft: 18,
+        }}
+      >
+        <li>
+          <strong>PNG, JPEG, or WebP</strong> — up to 6MB each.
+        </li>
+        <li>
+          <strong>At least 1600px wide</strong> is ideal. Larger is fine (we resize to 2000px);
+          smaller will look soft once published.
+        </li>
+        <li>
+          Full-window screenshots work best — they&rsquo;re shown wide at the top of the project
+          page and can be opened full size.
+        </li>
+      </ul>
 
       {reviewNote && (
         <div
