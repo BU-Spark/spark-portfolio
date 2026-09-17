@@ -4,7 +4,7 @@
 // live in lib/upload so the token-gated PM uploader shares identical rules.
 import { requireAdmin } from "@/lib/actor";
 import { processImageUpload } from "@/lib/upload";
-import { S3ConfigError } from "@/lib/s3";
+import { S3ConfigError, S3WriteError } from "@/lib/s3";
 
 export async function POST(req: Request) {
   // Any admin: this returns an S3 key and is not project-bound. Keys only become
@@ -31,6 +31,12 @@ export async function POST(req: Request) {
     if (e instanceof S3ConfigError) {
       console.error("Upload failed:", e.message);
       return Response.json({ error: e.message }, { status: 503 });
+    }
+    // Admin-only, so the full reason is safe to return — it is the thing that
+    // tells you whether to fix a permission, a bucket name, or a credential.
+    if (e instanceof S3WriteError) {
+      console.error("Upload failed:", e.message);
+      return Response.json({ error: e.message }, { status: 502 });
     }
     throw e;
   }

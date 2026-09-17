@@ -54,19 +54,42 @@ function getClient(): S3Client {
 
 const BUCKET = () => process.env.R2_BUCKET || "";
 
+/** Thrown when the bucket REJECTS a write (as opposed to not being configured).
+ *  Separate from S3ConfigError because the fixes differ: one is a missing
+ *  variable, the other is a credential without write permission, a bucket that
+ *  does not exist, or a provider mismatch. */
+export class S3WriteError extends Error {}
+
 export async function putObject(
   key: string,
   body: Buffer | Uint8Array,
   contentType: string
 ): Promise<void> {
-  await getClient().send(
-    new PutObjectCommand({
-      Bucket: BUCKET(),
-      Key: key,
-      Body: body,
-      ContentType: contentType,
-    })
-  );
+  try {
+    await getClient().send(
+      new PutObjectCommand({
+        Bucket: BUCKET(),
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+      })
+    );
+  } catch (e) {
+    if (e instanceof S3ConfigError) throw e;
+    // The SDK's error carries the actual cause — AccessDenied for a read-only
+    // token, NoSuchBucket for a wrong name, InvalidAccessKeyId for keys from a
+    // different provider. Uncaught, all three arrive as an identical blank 500,
+    // which is indistinguishable from "not configured" and sends whoever is
+    // debugging back to the variables they already set correctly.
+    const name = (e as { name?: string })?.name;
+    const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+    throw new S3WriteError(
+      `Object storage rejected the write${name ? `: ${name}` : ""}` +
+        `${status ? ` (HTTP ${status})` : ""}. ` +
+        `Check that the credential has WRITE access to the bucket and that all ` +
+        `R2_* values come from the same account.`
+    );
+  }
 }
 
 export async function getObject(
