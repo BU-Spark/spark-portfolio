@@ -11,6 +11,7 @@
 // actually landed. Always confirm with a real send to an inbox you can open.
 import "server-only";
 import { Resend } from "resend";
+import { errorText } from "./errorText";
 
 const FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
 
@@ -56,7 +57,13 @@ export async function sendUploadInvite(
              expires in 14 days. You can forward it to a teammate. No login required.</p>
         </div>`,
     });
-    if (error) return { sent: false, error: String(error) };
+    // Resend returns an OBJECT here ({ name, message, statusCode }), and
+    // String(obj) is the literal text "[object Object]" — which is what the admin
+    // uploads page displayed as the reason a PM invite failed, destroying the one
+    // piece of information that would have explained it (an unverified sending
+    // domain, a rejected address, a rate limit). Pull the message out, and fall
+    // back to JSON rather than to a stringify that cannot fail informatively.
+    if (error) return { sent: false, error: errorText(error) };
     return { sent: true };
   } catch (e) {
     return { sent: false, error: e instanceof Error ? e.message : "send failed" };
