@@ -9,7 +9,7 @@ import {
   removeUploadRequestImage,
 } from "@/lib/db";
 import { processImageUpload } from "@/lib/upload";
-import { S3ConfigError } from "@/lib/s3";
+import { S3ConfigError, S3WriteError } from "@/lib/s3";
 import { deleteObject } from "@/lib/s3";
 import { checkRateLimit } from "@/lib/ratelimit";
 
@@ -81,6 +81,16 @@ export async function POST(
     if (e instanceof S3ConfigError) {
       console.error("Upload failed:", e.message);
       return Response.json({ error: e.message }, { status: 503 });
+    }
+    // Token-gated but not admin-only, so the provider's wording is logged rather
+    // than returned — it can name the bucket. The uploader still learns that the
+    // failure is ours and not their file, which is what they can act on.
+    if (e instanceof S3WriteError) {
+      console.error("Upload failed:", e.message);
+      return Response.json(
+        { error: "Upload storage is unavailable right now — this is on our side, not your file." },
+        { status: 502 }
+      );
     }
     throw e;
   }
