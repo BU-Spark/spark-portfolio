@@ -645,6 +645,7 @@ function ReviewPanel({
 function BulkPanel({ notify }: { notify: Notify }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
+  const [emailing, setEmailing] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -732,6 +733,33 @@ function BulkPanel({ notify }: { notify: Notify }) {
       notify("err", e instanceof Error ? e.message : "Generation failed.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Send an existing link. Separate from generate() on purpose: that mints a new
+  // token and invalidates the old one, which is the wrong move when the PM simply
+  // never received the mail.
+  const emailLink = async (c: Candidate) => {
+    const to = (c.pmEmail || "").trim() || window.prompt(`Email the ${c.title} link to:`)?.trim();
+    if (!to) return;
+    setEmailing(c.id);
+    try {
+      const res = await fetch("/api/upload-requests/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: c.id, email: to }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Send failed (${res.status})`);
+      notify("ok", `Emailed ${d.to}.`);
+      setGen((prev) => ({
+        ...prev,
+        [c.id]: { ...(prev[c.id] || { id: c.id, emailed: false, status: "created" }), emailed: true },
+      }));
+    } catch (e) {
+      notify("err", e instanceof Error ? e.message : "Send failed.");
+    } finally {
+      setEmailing(null);
     }
   };
 
@@ -942,6 +970,24 @@ function BulkPanel({ notify }: { notify: Notify }) {
                         open
                       </a>
                       <CopyButton value={url} title="Copy upload link" />
+                      <button
+                        className="btn-sm"
+                        onClick={() => emailLink(c)}
+                        disabled={emailing === c.id || !emailConfigured}
+                        title={
+                          !emailConfigured
+                            ? "Email is off — no RESEND_API_KEY on the Worker"
+                            : c.pmEmail
+                              ? `Email this link to ${c.pmEmail}`
+                              : "No PM email on file — you'll be asked for one"
+                        }
+                        style={{
+                          opacity: emailing === c.id || !emailConfigured ? 0.45 : 1,
+                          cursor: emailing === c.id || !emailConfigured ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {emailing === c.id ? "sending…" : "email"}
+                      </button>
                     </>
                   ) : (
                     <button
