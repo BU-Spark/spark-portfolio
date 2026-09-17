@@ -1,16 +1,57 @@
-// Object storage for project screenshots. Cloudflare R2 in production, reached
-// through the S3 API — R2 is S3-compatible, which is why this still uses
-// @aws-sdk/client-s3 while every variable is named R2_*. The names follow the
-// provider, not the protocol, so nobody has to guess which account a credential
-// belongs to (a Railway key against an R2 endpoint fails as a 403, not a clear
-// error). Server-only.
+// Object storage for project screenshots. Server-only.
+//
+// TWO PATHS, and the first one is the one that works on Cloudflare:
+//
+//   1. The native R2 BINDING (env.BUCKET) when running on Workers. No signing,
+//      no credentials, no XML — the platform hands the Worker a direct handle to
+//      the bucket.
+//   2. The S3 API via @aws-sdk/client-s3, for local development against the
+//      Railway bucket, where there is no binding.
+//
+// Why the binding rather than the SDK everywhere: the AWS SDK parses S3's
+// responses with DOMParser, which does not exist in workerd. Successful calls
+// are fine — they carry no XML — but EVERY error response is XML, so any
+// storage failure became `ReferenceError: DOMParser is not defined` thrown from
+// inside the SDK, surfacing as Cloudflare error 1101 (an isolate crash) instead
+// of a catchable error. Reproduced in a standalone worker: a PutObject that
+// succeeds returns fine, and the same call against a nonexistent bucket crashes
+// rather than reporting NoSuchBucket.
+//
+// That is unfixable from our side — we cannot catch what the SDK cannot
+// construct — and it means every diagnostic we add around the SDK is dead code
+// on Workers. The binding removes the XML path, the credentials, the endpoint
+// and the checksum negotiation in one move.
 import "server-only";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
+
+/** The subset of the R2 binding this module uses. */
+type R2Bucket = {
+  put(key: string, value: Uint8Array, opts?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  get(key: string): Promise<{ body: ReadableStream; httpMetadata?: { contentType?: string } } | null>;
+  delete(key: string): Promise<void>;
+};
+
+/**
+ * The R2 binding, or undefined when running anywhere but Workers.
+ *
+ * Named BUCKET rather than R2_BUCKET so it cannot be confused with the env VAR
+ * of that name, which holds a bucket's name for the SDK path.
+ */
+async function r2(): Promise<R2Bucket | undefined> {
+  try {
+    const { env } = await getCloudflareContext({ async: true });
+    return (env as { BUCKET?: R2Bucket }).BUCKET;
+  } catch {
+    // No Cloudflare context: ordinary `next dev`, scripts, tests.
+    return undefined;
+  }
+}
 
 /** Thrown when object storage isn't configured, so callers can distinguish a
  *  misconfiguration from a genuinely absent object. */
@@ -77,6 +118,19 @@ export async function putObject(
   body: Buffer | Uint8Array,
   contentType: string
 ): Promise<void> {
+  const bucket = await r2();
+  if (bucket) {
+    // Binding path: errors arrive as ordinary exceptions with readable messages,
+    // not as XML the SDK cannot parse.
+    try {
+      await bucket.put(key, new Uint8Array(body), { httpMetadata: { contentType } });
+      return;
+    } catch (e) {
+      throw new S3WriteError(
+        `Object storage rejected the write: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
   try {
     await getClient().send(
       new PutObjectCommand({
@@ -107,6 +161,15 @@ export async function putObject(
 export async function getObject(
   key: string
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
+  const bucket = await r2();
+  if (bucket) {
+    const obj = await bucket.get(key);
+    if (!obj) return null;
+    return {
+      body: obj.body,
+      contentType: obj.httpMetadata?.contentType || "application/octet-stream",
+    };
+  }
   try {
     const res = await getClient().send(
       new GetObjectCommand({ Bucket: BUCKET(), Key: key })
@@ -128,6 +191,11 @@ export async function getObject(
 
 export async function deleteObject(key: string): Promise<void> {
   try {
+    const bucket = await r2();
+    if (bucket) {
+      await bucket.delete(key);
+      return;
+    }
     await getClient().send(
       new DeleteObjectCommand({ Bucket: BUCKET(), Key: key })
     );
