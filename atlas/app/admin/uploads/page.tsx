@@ -740,7 +740,12 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // token and invalidates the old one, which is the wrong move when the PM simply
   // never received the mail.
   const emailLink = async (c: Candidate) => {
-    const to = (c.pmEmail || "").trim() || window.prompt(`Email the ${c.title} link to:`)?.trim();
+    // Always ask, pre-filled with the PM. The PM on file is the usual recipient
+    // but not always the right one — a lead changes, or it needs to go to a
+    // teammate — so the address stays editable rather than implied.
+    const to = window
+      .prompt(`Email the "${c.title}" upload link to:`, (c.pmEmail || "").trim())
+      ?.trim();
     if (!to) return;
     setEmailing(c.id);
     try {
@@ -978,8 +983,8 @@ function BulkPanel({ notify }: { notify: Notify }) {
                           !emailConfigured
                             ? "Email is off — no RESEND_API_KEY on the Worker"
                             : c.pmEmail
-                              ? `Email this link to ${c.pmEmail}`
-                              : "No PM email on file — you'll be asked for one"
+                              ? `Email this link — defaults to ${c.pmEmail}, editable`
+                              : "Email this link to any address"
                         }
                         style={{
                           opacity: emailing === c.id || !emailConfigured ? 0.45 : 1,
