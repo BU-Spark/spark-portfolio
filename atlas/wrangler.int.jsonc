@@ -64,14 +64,15 @@
   // write-only, while a variable is readable by anyone with dashboard access.
   // keep_vars protects both kinds from being deleted; it does not make a plain
   // variable a safe place for a key.
-  // R2 BINDING — the production path for project screenshots.
+  // R2 BINDING — still commented out for int, deliberately.
   //
-  // COMMENTED OUT because `wrangler deploy` FAILS if bucket_name names a bucket
-  // that does not exist, and the name is not in this repo. Uncomment and fill in
-  // the real bucket, then deploy. lib/s3.ts prefers this binding and falls back
-  // to the S3 API (the R2_* variables) when it is absent, so leaving it
-  // commented changes nothing today — it just keeps using the path that crashes
-  // on any error.
+  // Only one bucket exists so far: spark-portfolio-prod, bound in wrangler.jsonc.
+  // Pointing int at it would let staging uploads overwrite production screenshots
+  // by key, so int keeps using the S3-API fallback until a spark-portfolio-int
+  // bucket exists. Uploads on int therefore still fail the old way — that is a
+  // known gap, not a regression.
+  //
+  // To finish this: create the bucket, then uncomment below.
   //
   // This must live HERE and not only in the dashboard: a deploy replaces the
   // Worker's bindings with whatever this file declares. `keep_vars` protects

@@ -82,27 +82,31 @@
   // variable a safe place for a key.
   // R2 BINDING — the production path for project screenshots.
   //
-  // COMMENTED OUT because `wrangler deploy` FAILS if bucket_name names a bucket
-  // that does not exist, and the name is not in this repo. Uncomment and fill in
-  // the real bucket, then deploy. lib/s3.ts prefers this binding and falls back
-  // to the S3 API (the R2_* variables) when it is absent, so leaving it
-  // commented changes nothing today — it just keeps using the path that crashes
-  // on any error.
-  //
   // This must live HERE and not only in the dashboard: a deploy replaces the
   // Worker's bindings with whatever this file declares. `keep_vars` protects
   // variables, NOT bindings — a binding added only in the dashboard disappears
   // on the next deploy, which is exactly how the R2_* variables were lost.
   //
-  // "binding" is the name the code reads (env.BUCKET); "bucket_name" is the
-  // bucket in your Cloudflare account. They do not have to match.
+  // lib/s3.ts prefers this binding and falls back to the S3 API (the R2_*
+  // variables) only when it is absent. The fallback exists for `next dev`, which
+  // has no Workers runtime to bind through; in production it should never run.
+  // That matters because the AWS SDK cannot report an error on workerd — its
+  // parseXML needs DOMParser, which does not exist there, so an S3-API failure
+  // surfaces as a bare 1101 with no message rather than as the actual problem.
   //
-  // "r2_buckets": [
-  //   {
-  //     "binding": "BUCKET",
-  //     "bucket_name": "<the R2 bucket name>"
-  //   }
-  // ],
+  // NOTE: `wrangler deploy` FAILS outright if bucket_name names a bucket that
+  // does not exist in the account. If a deploy starts failing here, check the
+  // bucket before checking anything else.
+  "r2_buckets": [
+    {
+      // "binding" is the name the code reads (env.BUCKET in lib/s3.ts);
+      // "bucket_name" is the bucket in the Cloudflare account. They do not have
+      // to match, and this one deliberately does not — renaming the bucket later
+      // should not mean touching the code.
+      "binding": "BUCKET",
+      "bucket_name": "spark-portfolio-prod"
+    }
+  ],
 
   "keep_vars": true,
 
