@@ -27,6 +27,7 @@ import {
   type Visibility,
 } from "./data";
 import { deleteObject } from "./s3";
+import { connectOnceMore } from "./retry";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
 import { ORGS, canEdit, canMerge, type Actor } from "./authz";
@@ -89,7 +90,16 @@ export async function query<T = Record<string, unknown>>(
 ): Promise<T[]> {
   let release: (() => Promise<void>) | undefined;
   try {
-    const acquired = await acquireClient();
+    // Retry the connection, not the statement — see lib/retry.ts for why
+    // replaying a query that already reached Postgres is unsafe.
+    const acquired = await connectOnceMore(acquireClient, (error) => {
+      const e = error as { name?: unknown; message?: unknown; code?: unknown };
+      console.warn("Postgres connect failed, retrying once", {
+        name: typeof e.name === "string" ? e.name : undefined,
+        message: typeof e.message === "string" ? e.message : undefined,
+        code: typeof e.code === "string" ? e.code : undefined,
+      });
+    });
     release = acquired.release;
     const res = await acquired.client.query(text, params as never);
     return res.rows as T[];
