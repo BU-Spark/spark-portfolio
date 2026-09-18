@@ -254,10 +254,10 @@ const PROBES = [
 
 // ── Notification ──────────────────────────────────────────────────────────
 
-// Slack gets the short version; the GitHub issue carries the full detail. A
-// 30-word cap is a real constraint, not a style preference: an ask that fits in
-// a notification preview gets acted on, and a paragraph gets scrolled past.
-const WORD_LIMIT = 30;
+// Slack gets the short version; the GitHub issue carries the full detail. The
+// cap is a real constraint, not a style preference: an ask that fits in a
+// notification preview gets acted on, and a paragraph gets scrolled past.
+const WORD_LIMIT = 50;
 
 export function terse(text) {
   const words = text.replace(/\s+/g, " ").trim().split(" ");
@@ -373,7 +373,9 @@ async function selfCheck() {
   // ── The word cap is a contract, so it is tested, not trusted ──
   assert(wordCount("one two three") === 3, "word count");
   assert(terse("a b c") === "a b c", "short text passes through");
-  const long = Array.from({ length: 50 }, (_, i) => `w${i}`).join(" ");
+  // Derived from the constant, not hardcoded: a fixture pinned to the old cap
+  // silently stops testing the trim the moment WORD_LIMIT changes.
+  const long = Array.from({ length: WORD_LIMIT + 10 }, (_, i) => `w${i}`).join(" ");
   assert(wordCount(terse(long)) === WORD_LIMIT, "overlong text is trimmed to the cap");
   assert(terse(long).endsWith("…"), "a trim is visible rather than silent");
   assert(terse("  spaced   out  ") === "spaced out", "whitespace collapses");
@@ -495,7 +497,11 @@ async function main() {
           method: "PATCH",
           body: JSON.stringify({ state: "closed" }),
         });
-        await postSlack(terse(`Resolved: ${probe.title.replace(/^the /, "")} — the live check now passes. Thanks!`));
+        // Link the (now closed) issue here too, so the resolution is traceable
+        // back to what was actually wrong rather than just announcing itself.
+        await postSlack(
+          `${terse(`Resolved: ${probe.title.replace(/^the /, "")} — the live check now passes. Thanks!`)}\n${existing.html_url}`
+        );
         console.log(`  → closed #${existing.number} and posted to Slack`);
         break;
       }
