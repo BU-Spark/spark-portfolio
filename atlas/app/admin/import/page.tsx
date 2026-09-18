@@ -199,6 +199,17 @@ interface ImportResult {
   skippedCount?: number;
   skipped?: string[];
   inboxed?: number;
+  /** Of `inboxed`, the rows that did not exist before this run. */
+  inboxedNew?: number;
+  /** Unmatched names that were never queued — nobody will find these in the inbox. */
+  notInboxed?: string[];
+  /** Exact matches owned by the OTHER team. lib/import.ts deliberately does not
+   *  inbox these and relies on someone reading this list; it was absent from
+   *  this interface, so the names were returned and rendered nowhere. */
+  crossOrg?: string[];
+  /** Applied via edit-distance matching rather than an exact hit — a guess that
+   *  wrote to a real project, so it is disclosed rather than assumed right. */
+  fuzzyMatched?: string[];
   noBlurb?: string[];
   error?: string;
 }
@@ -794,11 +805,18 @@ export default function ImportCSVPage() {
                   ))}
                 </div>
 
-                {/* Unmatched project names — queued in inbox, expandable */}
+                {/* Unmatched project names. Split by whether they were actually
+                    queued: the old label said "(queued in inbox)" for the whole
+                    list, including the email addresses and one-character cells
+                    the noise filter drops — sending an admin to the inbox to
+                    triage rows that were never written. */}
                 {result.skipped && result.skipped.length > 0 && (
                   <div style={{ marginTop: 14 }}>
                     <div style={nameListLabelStyle}>
-                      Unmatched project names (queued in inbox)
+                      Unmatched project names
+                      {result.notInboxed && result.notInboxed.length > 0
+                        ? ` (${result.skipped.length - result.notInboxed.length} queued in inbox, ${result.notInboxed.length} ignored as noise)`
+                        : " (queued in inbox)"}
                     </div>
                     <div
                       style={{
@@ -841,6 +859,50 @@ export default function ImportCSVPage() {
                 )}
 
                 {/* Matched but PD had no extractable blurb */}
+                {/* Exact matches owned by the OTHER team. lib/import.ts skips the
+                    inbox for these deliberately and says recovery "depends on
+                    someone reading the crossOrg list" — which nothing rendered,
+                    so the names vanished between Received and Updated with no
+                    trace. */}
+                {result.crossOrg && result.crossOrg.length > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={nameListLabelStyle}>
+                      Owned by the other team (not imported, not queued)
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: 12,
+                        color: "var(--sec)",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {result.crossOrg.join(", ")}
+                    </div>
+                  </div>
+                )}
+
+                {/* A fuzzy hit WROTE to a real project on an edit-distance-2
+                    guess. Disclosed rather than assumed correct: it is the one
+                    class of write here that can silently land on the wrong row. */}
+                {result.fuzzyMatched && result.fuzzyMatched.length > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={nameListLabelStyle}>
+                      Matched by similarity — check these landed on the right project
+                    </div>
+                    <div
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: 12,
+                        color: "var(--sec)",
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {result.fuzzyMatched.join(", ")}
+                    </div>
+                  </div>
+                )}
+
                 {result.noBlurb && result.noBlurb.length > 0 && (
                   <div style={{ marginTop: 14 }}>
                     <div style={nameListLabelStyle}>
@@ -870,8 +932,17 @@ export default function ImportCSVPage() {
                         textDecoration: "none",
                       }}
                     >
-                      Review {result.inboxed} new inbox row
-                      {result.inboxed === 1 ? "" : "s"} →
+                      {/* `inboxed` counts upserts, and the upsert bumps seen_count
+                          on a row that already existed — so re-syncing last week's
+                          CSV used to report the whole feed as new. Only inboxedNew
+                          is actually new, and a re-seen row that was dismissed is
+                          not even in the pending queue. */}
+                      {(result.inboxedNew ?? result.inboxed) === 0
+                        ? `${result.inboxed} inbox row${result.inboxed === 1 ? "" : "s"} seen again, none new →`
+                        : `Review ${result.inboxedNew ?? result.inboxed} new inbox row${(result.inboxedNew ?? result.inboxed) === 1 ? "" : "s"}` +
+                          ((result.inboxed ?? 0) > (result.inboxedNew ?? 0)
+                            ? ` (${(result.inboxed ?? 0) - (result.inboxedNew ?? 0)} seen again) →`
+                            : " →")}
                     </Link>
                   </div>
                 )}
