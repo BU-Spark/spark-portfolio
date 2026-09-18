@@ -13,6 +13,7 @@ import PageHeader from "@/components/admin/PageHeader";
 import { getProjectAdmin, listContributors } from "@/lib/db";
 import { courseLabel } from "@/lib/data";
 import { disciplineColor } from "@/lib/colors";
+import ProjectGallery from "@/components/ProjectGallery";
 import {
   primaryDiscipline,
   projectDisciplines,
@@ -178,64 +179,19 @@ export default async function AdminProjectDetailPage({
         >
           {/* ───────────── MAIN COLUMN ───────────── */}
           <div style={{ minWidth: 0 }}>
-            {/* Image gallery (resolved /api/img URLs from getProjectAdmin) */}
+            {/* Image gallery — the SAME component the public page uses, so the
+                preview cannot drift from what a visitor sees, and so the
+                empty-slot fix only had to happen once. Renders a tile per real
+                image rather than padding to four: three striped placeholders
+                beside one screenshot reads as broken images, not as "no more
+                images". URLs are already resolved /api/img paths here. */}
             <div style={{ marginBottom: 4 }}>
-              {/* Primary / cover image */}
-              <div
-                style={{
-                  position: "relative",
-                  width: "100%",
-                  aspectRatio: "16 / 8",
-                  borderRadius: 14,
-                  overflow: "hidden",
-                  ...(project.images?.[0]
-                    ? { background: "none" }
-                    : {
-                        background: `repeating-linear-gradient(${90 + (project.id.length % 4) * 30}deg, color-mix(in oklab, ${color} 16%, #fff) 0 14px, color-mix(in oklab, ${color} 7%, #fff) 14px 28px)`,
-                      }),
-                }}
-              >
-                {project.images?.[0] ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={project.images[0]}
-                    alt={`${project.title} image 1`}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                  />
-                ) : (
-                  <NoImg />
-                )}
-              </div>
-              {/* Thumbnails */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      position: "relative",
-                      aspectRatio: "4 / 3",
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      ...(project.images?.[i]
-                        ? { background: "none" }
-                        : {
-                            background: `repeating-linear-gradient(${90 + ((i * 37 + project.id.length) % 4) * 30}deg, color-mix(in oklab, ${color} ${16 - i * 2}%, #fff) 0 14px, color-mix(in oklab, ${color} 7%, #fff) 14px 28px)`,
-                          }),
-                    }}
-                  >
-                    {project.images?.[i] ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img
-                        src={project.images[i]}
-                        alt={`${project.title} image ${i + 1}`}
-                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                      />
-                    ) : (
-                      <NoImg />
-                    )}
-                  </div>
-                ))}
-              </div>
+              <ProjectGallery
+                title={project.title}
+                images={project.images}
+                color={color}
+                seed={project.id.length}
+              />
             </div>
 
             {/* Discipline eyebrow */}
@@ -765,29 +721,6 @@ export default async function AdminProjectDetailPage({
         </div>
       </div>
     </>
-  );
-}
-
-// Discipline-tinted "No image" placeholder marker (top-left chip).
-function NoImg() {
-  return (
-    <span
-      style={{
-        position: "absolute",
-        top: 8,
-        left: 8,
-        fontFamily: "var(--mono)",
-        fontSize: 9,
-        letterSpacing: "0.06em",
-        textTransform: "uppercase",
-        color: "var(--ink-4)",
-        background: "rgba(255,255,255,0.82)",
-        padding: "2px 6px",
-        borderRadius: 3,
-      }}
-    >
-      No image
-    </span>
   );
 }
 
