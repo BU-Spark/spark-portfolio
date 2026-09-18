@@ -14,7 +14,12 @@ on:
     # (an ask is posted ONCE per blocker regardless — repetition is prevented by
     # the open issue, not by the interval).
     - cron: "0 */3 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      test_message:
+        description: "Send this text to Slack and exit (plumbing test; skips probes and issues)"
+        type: string
+        required: false
 
 # Least privilege: it opens and closes issues, nothing else. No contents:write,
 # so a bug here cannot touch the codebase.
@@ -50,4 +55,9 @@ jobs:
           SLACK_OWNER_CLOUDFLARE: ${{ vars.SLACK_OWNER_CLOUDFLARE }}
           SLACK_OWNER_DNS: ${{ vars.SLACK_OWNER_DNS }}
           SLACK_OWNER_RESEND: ${{ vars.SLACK_OWNER_RESEND }}
+          # Passed via env, never interpolated into the run script — the digest
+          # workflow documents the same rule. A dispatch input is attacker-
+          # controllable in principle, and inlining it would be a shell-
+          # injection surface.
+          TEST_MESSAGE: ${{ inputs.test_message }}
         run: node scripts/ops-blockers/check.mjs
