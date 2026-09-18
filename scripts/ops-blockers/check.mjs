@@ -23,6 +23,11 @@
 
 const DRY = process.argv.includes("--dry-run");
 const SELF_CHECK = process.argv.includes("--self-check");
+// A one-off message sent through the real notification path, to prove the
+// webhook and the channel wiring work. Deliberately posts and exits without
+// probing or touching issues: a plumbing test must not be able to open, close,
+// or comment on a blocker.
+const TEST_MESSAGE = process.env.TEST_MESSAGE || "";
 
 // Slack member IDs, so an ask reaches whoever can act on it. A missing ID posts
 // the ask unmentioned rather than failing — better a quiet notice than none.
@@ -301,6 +306,17 @@ async function selfCheck() {
 
 async function main() {
   if (SELF_CHECK) return await selfCheck();
+
+  if (TEST_MESSAGE) {
+    if (DRY) {
+      console.log("--- would post to Slack ---");
+      console.log(TEST_MESSAGE);
+      return;
+    }
+    await postSlack(TEST_MESSAGE);
+    console.log("posted test message to Slack");
+    return;
+  }
 
   const results = [];
   for (const probe of PROBES) {
