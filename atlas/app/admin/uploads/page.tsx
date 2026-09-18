@@ -646,6 +646,11 @@ function BulkPanel({ notify }: { notify: Notify }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [emailConfigured, setEmailConfigured] = useState(false);
   const [emailing, setEmailing] = useState<string | null>(null);
+  // Which row has its "PM / custom" choice expanded. Only one at a time: this
+  // sends real mail to external people, and two open choosers is two chances to
+  // click the wrong row's button.
+  const [emailChoice, setEmailChoice] = useState<string | null>(null);
+  const [bulkEmailing, setBulkEmailing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -726,7 +731,7 @@ function BulkPanel({ notify }: { notify: Notify }) {
       } else {
         notify(
           "ok",
-          `Created ${d.created} link${d.created === 1 ? "" : "s"}${d.emailed ? `, emailed ${d.emailed}` : ""}.`
+          `Created ${d.created} link${d.created === 1 ? "" : "s"}. Nobody has been emailed yet.`
         );
       }
     } catch (e) {
@@ -739,14 +744,12 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // Send an existing link. Separate from generate() on purpose: that mints a new
   // token and invalidates the old one, which is the wrong move when the PM simply
   // never received the mail.
-  const emailLink = async (c: Candidate) => {
-    // Always ask, pre-filled with the PM. The PM on file is the usual recipient
-    // but not always the right one — a lead changes, or it needs to go to a
-    // teammate — so the address stays editable rather than implied.
-    const to = window
-      .prompt(`Email the "${c.title}" upload link to:`, (c.pmEmail || "").trim())
-      ?.trim();
+  // `to` is always explicit — chosen from the PM on file or typed in. Nothing
+  // here infers a recipient, because an inferred recipient is how an invite
+  // goes to a stale address without anyone deciding to send it there.
+  const emailLink = async (c: Candidate, to: string) => {
     if (!to) return;
+    setEmailChoice(null);
     setEmailing(c.id);
     try {
       const res = await fetch("/api/upload-requests/email", {
@@ -767,6 +770,66 @@ function BulkPanel({ notify }: { notify: Notify }) {
       setEmailing(null);
     }
   };
+
+  // Email every linked project's own PM. Separate from generate() on purpose:
+  // generating is reversible and private, sending is neither.
+  const emailAllPms = async () => {
+    const ids = linked.filter((c) => c.pmEmail).map((c) => c.id);
+    if (!ids.length) {
+      notify("err", "No linked projects have a PM email on file.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Email the upload link to ${ids.length} project manager${ids.length === 1 ? "" : "s"}? ` +
+          `Each goes to the PM on file for that project. This cannot be unsent.`
+      )
+    )
+      return;
+    setBulkEmailing(true);
+    try {
+      const res = await fetch("/api/upload-requests/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectIds: ids }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Send failed (${res.status})`);
+      setGen((prev) => {
+        const next = { ...prev };
+        for (const r of d.results as { id: string; sent: boolean }[]) {
+          if (r.sent) {
+            next[r.id] = { ...(next[r.id] || { id: r.id, status: "created" }), emailed: true };
+          }
+        }
+        return next;
+      });
+      // Name the failures rather than just counting them — "3 failed" sends
+      // someone hunting through rows to find which.
+      const failed = (d.results as { title?: string; sent: boolean; reason?: string }[]).filter(
+        (r) => !r.sent
+      );
+      notify(
+        failed.length ? "err" : "ok",
+        failed.length
+          ? `Emailed ${d.sent}; ${failed.length} failed — ${failed[0].title ?? "a project"}: ${failed[0].reason}`
+          : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
+      );
+    } catch (e) {
+      notify("err", e instanceof Error ? e.message : "Send failed.");
+    } finally {
+      setBulkEmailing(false);
+    }
+  };
+
+  // How many linked projects could actually receive mail. Counted rather than
+  // assumed from linked.length: a project with a live link but no PM email on
+  // file is not sendable, and a button promising to email 40 that silently
+  // reaches 12 is worse than one that says 12.
+  const emailablePms = useMemo(
+    () => linked.filter((c) => c.pmEmail).length,
+    [linked]
+  );
 
   // Bulk outreach: title + URL, one per line.
   const allLinksText = useMemo(
@@ -802,10 +865,10 @@ function BulkPanel({ notify }: { notify: Notify }) {
   return (
     <div>
       <p className="subcopy" style={{ marginTop: 0, marginBottom: 18 }}>
-        Projects still missing screenshots. Generate a magic-upload link for each — emails
-        send automatically when a sender domain is configured; otherwise copy each link to the PM.
-        PMs come from the project&rsquo;s team roles; emails from the{" "}
-        <Link href="/admin/people">People directory</Link>.
+        Projects still missing screenshots. <strong>Generating a link never emails anyone</strong> —
+        create them all first, then send when you&rsquo;re ready, either to every PM at once or
+        row by row to an address you choose. PMs come from the project&rsquo;s team roles; emails
+        from the <Link href="/admin/people">People directory</Link>.
       </p>
 
       {/* ── Load error ── */}
@@ -830,11 +893,11 @@ function BulkPanel({ notify }: { notify: Notify }) {
       {!emailConfigured && !loadError && (
         <div className="banner amber">
           <div>
-            <div className="bt">Auto-email is off</div>
+            <div className="bt">Sending is off</div>
             <div className="bs">
-              No Resend domain. Links generate fine — copy each to the PM. Set{" "}
+              No Resend key on the Worker. Links generate fine — copy each to the PM. Set{" "}
               <code style={{ fontFamily: "var(--mono)" }}>RESEND_API_KEY</code> +{" "}
-              <code style={{ fontFamily: "var(--mono)" }}>EMAIL_FROM</code> to auto-send.
+              <code style={{ fontFamily: "var(--mono)" }}>EMAIL_FROM</code> to enable sending.
             </div>
           </div>
         </div>
@@ -874,6 +937,32 @@ function BulkPanel({ notify }: { notify: Notify }) {
           {busy
             ? "Generating…"
             : `Generate links for ${pending.length} project${pending.length === 1 ? "" : "s"}`}
+        </button>
+        {/* Separate action, deliberately. Generating is private and repeatable;
+            sending reaches people outside BU and cannot be undone, so it is its
+            own button with its own confirmation rather than a side effect of
+            the one above. */}
+        <button
+          className="btn"
+          onClick={emailAllPms}
+          disabled={bulkEmailing || !emailConfigured || emailablePms === 0}
+          title={
+            !emailConfigured
+              ? "Email is off — no RESEND_API_KEY on the Worker"
+              : emailablePms === 0
+                ? "No linked project has a PM email on file"
+                : "Send each linked project's link to its own PM"
+          }
+          style={{
+            fontSize: 14,
+            padding: "11px 20px",
+            opacity: bulkEmailing || !emailConfigured || emailablePms === 0 ? 0.5 : 1,
+            cursor: bulkEmailing || !emailConfigured || emailablePms === 0 ? "not-allowed" : "pointer",
+          }}
+        >
+          {bulkEmailing
+            ? "Sending…"
+            : `Email ${emailablePms} PM${emailablePms === 1 ? "" : "s"}`}
         </button>
         <CopyButton
           value={allLinksText}
@@ -975,24 +1064,62 @@ function BulkPanel({ notify }: { notify: Notify }) {
                         open
                       </a>
                       <CopyButton value={url} title="Copy upload link" />
-                      <button
-                        className="btn-sm"
-                        onClick={() => emailLink(c)}
-                        disabled={emailing === c.id || !emailConfigured}
-                        title={
-                          !emailConfigured
-                            ? "Email is off — no RESEND_API_KEY on the Worker"
-                            : c.pmEmail
-                              ? `Email this link — defaults to ${c.pmEmail}, editable`
-                              : "Email this link to any address"
-                        }
-                        style={{
-                          opacity: emailing === c.id || !emailConfigured ? 0.45 : 1,
-                          cursor: emailing === c.id || !emailConfigured ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        {emailing === c.id ? "sending…" : "email"}
-                      </button>
+                      {emailChoice === c.id ? (
+                        // Expanded choice. Two explicit destinations rather than
+                        // one button that guesses: "email" used to mean "send to
+                        // whoever is on file", which is exactly how an invite
+                        // reaches a stale address unnoticed.
+                        <>
+                          <button
+                            className="btn-sm teal"
+                            onClick={() => emailLink(c, (c.pmEmail || "").trim())}
+                            disabled={!c.pmEmail || emailing === c.id}
+                            title={c.pmEmail ? `Send to ${c.pmEmail}` : "No PM email on file"}
+                            style={{
+                              opacity: !c.pmEmail || emailing === c.id ? 0.45 : 1,
+                              cursor: !c.pmEmail || emailing === c.id ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {c.pmEmail ? `PM (${c.pmEmail})` : "no PM email"}
+                          </button>
+                          <button
+                            className="btn-sm"
+                            onClick={() => {
+                              const to = window
+                                .prompt(`Email the "${c.title}" upload link to:`, "")
+                                ?.trim();
+                              if (to) emailLink(c, to);
+                            }}
+                            disabled={emailing === c.id}
+                          >
+                            custom…
+                          </button>
+                          <button
+                            className="btn-sm"
+                            onClick={() => setEmailChoice(null)}
+                            title="Cancel"
+                          >
+                            ×
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn-sm"
+                          onClick={() => setEmailChoice(c.id)}
+                          disabled={emailing === c.id || !emailConfigured}
+                          title={
+                            !emailConfigured
+                              ? "Email is off — no RESEND_API_KEY on the Worker"
+                              : "Choose who to send this link to"
+                          }
+                          style={{
+                            opacity: emailing === c.id || !emailConfigured ? 0.45 : 1,
+                            cursor: emailing === c.id || !emailConfigured ? "not-allowed" : "pointer",
+                          }}
+                        >
+                          {emailing === c.id ? "sending…" : "email"}
+                        </button>
+                      )}
                     </>
                   ) : (
                     <button

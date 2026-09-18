@@ -24,7 +24,9 @@ const STATUS_LABEL: Record<ExistingReq["status"], string> = {
 export default function RequestUpload({ projectId }: { projectId: string }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ url: string; emailed: boolean; emailConfigured: boolean } | null>(null);
+  // No `emailed` field: minting never sends any more, so tracking it would be a
+  // state that is always false and a message that is always wrong.
+  const [result, setResult] = useState<{ url: string; emailConfigured: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ExistingReq[]>([]);
@@ -59,7 +61,7 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
         throw new Error(error || "Could not generate link.");
       }
       const data = await res.json();
-      setResult({ url: data.url, emailed: data.emailed, emailConfigured: data.emailConfigured });
+      setResult({ url: data.url, emailConfigured: data.emailConfigured });
       await loadExisting();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not generate link.");
@@ -183,11 +185,9 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
             </button>
           </div>
           <div style={{ fontSize: 12, color: "#6a6f74", marginTop: 8 }}>
-            {result.emailed
-              ? "Emailed to the PM. Copy the link too in case it lands in spam."
-              : result.emailConfigured
-                ? "Couldn't auto-send — copy the link and send it manually."
-                : "Copy this link and send it to the PM (email auto-send isn't set up yet)."}
+            {result.emailConfigured
+              ? "Link created — nothing has been sent. Copy it, or email it from Admin → Uploads."
+              : "Copy this link and send it to the PM (sending isn't set up yet)."}
           </div>
         </div>
       )}

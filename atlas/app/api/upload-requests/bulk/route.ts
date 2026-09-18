@@ -11,7 +11,7 @@ import {
   getPeopleMap,
   listUploadRequests,
 } from "@/lib/db";
-import { sendUploadInvite, emailConfigured } from "@/lib/email";
+import { emailConfigured } from "@/lib/email";
 import { normalizeName } from "@/lib/gdocs";
 import { semesterRank } from "@/lib/semester";
 
@@ -126,23 +126,16 @@ export async function POST(req: Request) {
     const email = pm ? peopleMap.get(normalizeName(pm))?.email ?? null : null;
     const { token } = await createUploadRequest(id, email);
     const url = `${base}/contribute/${token}`;
-    let emailed = false;
-    let note: string | undefined;
-    if (email && configured) {
-      const r = await sendUploadInvite(email, url, p.title);
-      emailed = r.sent;
-      if (!r.sent) note = r.error || "send failed";
-    } else {
-      note = email ? "email not configured (copy the link)" : "no PM email on file";
-    }
+    // Generating NEVER sends — see the note in ../route.ts. The recipient is
+    // still recorded on the request so the follow-up send knows who it is for.
     results.push({
       id,
       title: p.title,
       pm: pm || null,
       url,
-      emailed,
-      status: emailed ? "emailed" : "created",
-      note,
+      emailed: false,
+      status: "created",
+      note: email ? undefined : "no PM email on file",
     });
   }
 
