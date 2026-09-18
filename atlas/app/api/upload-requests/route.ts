@@ -8,7 +8,7 @@ import {
   listProjectUploadRequests,
   getProjectAdmin,
 } from "@/lib/db";
-import { sendUploadInvite, emailConfigured } from "@/lib/email";
+import { emailConfigured } from "@/lib/email";
 
 // Build the absolute magic-link URL. Prefer an explicit base (NEXT_PUBLIC_BASE_URL)
 // so links are stable; otherwise derive from the request origin (works locally
@@ -43,13 +43,12 @@ export async function POST(req: Request) {
   const { token, expiresAt } = await createUploadRequest(projectId, email);
   const url = `${baseUrl(req)}/contribute/${token}`;
 
-  let emailed = false;
-  if (email && emailConfigured()) {
-    const r = await sendUploadInvite(email, url, project.title);
-    emailed = r.sent;
-  }
-
-  return Response.json({ token, url, expiresAt, emailed, emailConfigured: emailConfigured() });
+  // Minting NEVER sends. Generating a link and telling a PM about it are
+  // separate decisions: the address on file is often stale or wrong, and an
+  // auto-send meant the only way to review a link before it left was not to
+  // create it. Sending is POST /api/upload-requests/email, which also lets the
+  // admin pick a different recipient.
+  return Response.json({ token, url, expiresAt, emailed: false, emailConfigured: emailConfigured() });
 }
 
 // GET — the review queue (?status=submitted, default), any status, or all
