@@ -1,9 +1,10 @@
 // Admin-gated BULK screenshot-upload outreach. The single-link flow
-// (../route.ts) mints one link per call; this generates links for many projects
-// at once, resolving each project's PM email from the people directory and
-// auto-emailing when a Resend domain is configured (copy-links otherwise — same
-// dormant-email behavior as the single flow). Idempotent: projects that already
-// have a live (open) link are skipped, never double-minted.
+// (../route.ts) mints one link per call; this mints them for many projects at
+// once, resolving each project's PM email from the people directory so a later
+// send knows who to reach. It does NOT email — sending is ../email/route.ts, so
+// that generating links for the whole backlog and contacting forty external
+// people stay two separate decisions. Idempotent: projects that already have a
+// live (open) link are skipped, never double-minted.
 import { requireAdmin, requireProject, requireProjects } from "@/lib/actor";
 import {
   createUploadRequest,
@@ -40,7 +41,11 @@ export async function GET(req: Request) {
     getPeopleMap(),
     listUploadRequests("open", g.actor),
   ]);
-  const openByProject = new Map(open.map((r) => [r.projectId, r.token]));
+  // Carry the whole request, not just the token: the UI needs to know whether a
+  // link was ever EMAILED. That lives only in the database — it used to live in
+  // React state, so a page reload made every already-sent row look unsent and
+  // invited a second round of mail to the same people.
+  const openByProject = new Map(open.map((r) => [r.projectId, r]));
   const base = baseUrl(req);
 
   const candidates = projects
@@ -52,13 +57,15 @@ export async function GET(req: Request) {
     .map((p) => {
       const pm = (p.pm || "").trim();
       const pmEmail = pm ? peopleMap.get(normalizeName(pm))?.email ?? null : null;
-      const token = openByProject.get(p.id);
+      const request = openByProject.get(p.id);
       return {
         id: p.id,
         title: p.title,
         pm: pm || null,
         pmEmail,
-        openUrl: token ? `${base}/contribute/${token}` : null,
+        openUrl: request ? `${base}/contribute/${request.token}` : null,
+        emailedAt: request?.emailedAt ?? null,
+        emailedTo: request?.emailedTo ?? null,
         semester: latestTerm(p.runs),
       };
     });
@@ -66,7 +73,8 @@ export async function GET(req: Request) {
   return Response.json({ candidates, emailConfigured: emailConfigured() });
 }
 
-// POST — generate (and email where possible) links for the given project ids.
+// POST — generate links for the given project ids. Sending is a separate
+// action (../email/route.ts); nothing here emails anyone.
 // Body: { projectIds: string[] }. Partial-success: one project's failure never
 // aborts the batch. Returns a per-project result list + counts.
 export async function POST(req: Request) {

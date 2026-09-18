@@ -62,6 +62,14 @@ export interface ImportResult {
   /** Matched a project owned by the OTHER team. Reported, never inboxed. */
   crossOrg: string[];
   inboxed: number;
+  /** Of `inboxed`, how many rows did not exist before. The rest were re-seen —
+   *  the upsert bumps seen_count and leaves a dismissed row dismissed, so a
+   *  repeat sync queues nothing new even though `inboxed` is large. */
+  inboxedNew: number;
+  /** Unmatched names that were NOT queued: an email address or a one-character
+   *  cell read as a project name, or a name that normalises to nothing. They
+   *  are in `skipped` but nobody will find them in the inbox. */
+  notInboxed: string[];
   noBlurb: string[];
   fuzzyMatched: string[];
   /** True when nothing was written. */
@@ -117,6 +125,8 @@ export async function runImport(
   const noBlurb: string[] = []; // matched, but PD text had no extractable block
   const fuzzyMatched: string[] = []; // resolved via edit-distance fallback
   let inboxed = 0;
+  let inboxedNew = 0;
+  const notInboxed: string[] = []; // skipped AND not queued for triage
 
   for (const r of rows) {
     // Strip newline-appended bundle metadata ("ProjectName\nBundle N: SE/UX: X")
@@ -154,7 +164,9 @@ export async function runImport(
         const repo = (r.github || "").trim();
         // A dry run still COUNTS what it would inbox (inboxed++ below) but writes no
         // row — otherwise previewing a sync would leave triage work behind.
-        if (!dry) await upsertInboxRow(
+        const outcome = dry
+          ? "inserted"
+          : await upsertInboxRow(
           {
             rawName: name,
             partner: cleanClientName(r.client || "") || splitClientProject(name).client,
@@ -178,7 +190,18 @@ export async function runImport(
           // trusting whoever later opens the inbox.
           org
         );
-        inboxed++;
+        if (outcome === "ignored") {
+          // matchKey() found nothing usable in the name, so no row exists.
+          notInboxed.push(name);
+        } else {
+          inboxed++;
+          if (outcome === "inserted") inboxedNew++;
+        }
+      } else {
+        // Failed the noise filter above — an email address or a single
+        // character. Recorded so the UI can say it was ignored rather than
+        // listing it under "queued in inbox".
+        notInboxed.push(name);
       }
       continue;
     }
@@ -337,6 +360,8 @@ export async function runImport(
     skipped,
     crossOrg,
     inboxed,
+    inboxedNew,
+    notInboxed,
     noBlurb,
     fuzzyMatched,
     ...(dry ? { dry: true as const, changes } : {}),

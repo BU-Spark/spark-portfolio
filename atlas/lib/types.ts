@@ -177,7 +177,9 @@ export interface UploadRequest {
   token: string;
   projectId: string;
   projectTitle?: string; // joined from projects for the admin queue
-  recipient: string | null; // email it was sent to (record-keeping, NOT auth)
+  recipient: string | null; // the PM resolved when the link was MINTED — not proof anything was sent
+  emailedAt?: string | null; // when a send last succeeded; null means never sent
+  emailedTo?: string | null; // the address that send actually went to
   status: UploadRequestStatus;
   images: string[]; // pending S3 keys (≤4)
   createdAt: string;

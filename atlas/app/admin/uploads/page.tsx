@@ -39,6 +39,12 @@ type Candidate = {
   title: string;
   pm: string | null;
   pmEmail: string | null;
+  /** When a send last SUCCEEDED for this project's open link, from the database.
+   *  Without it the emailed badge lived only in React state, so a reload showed
+   *  every already-contacted row as unsent — and the bulk send would mail them
+   *  all over again. */
+  emailedAt?: string | null;
+  emailedTo?: string | null;
   openUrl: string | null;
   semester: string | null;
 };
@@ -782,7 +788,10 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // Email every linked project's own PM. Separate from generate() on purpose:
   // generating is reversible and private, sending is neither.
   const emailAllPms = async () => {
-    const ids = linked.filter((c) => c.pmEmail).map((c) => c.id);
+    // Already-emailed rows are excluded, not re-sent. A second identical invite
+    // to an external PM reads as a mistake on our side, and the per-row button
+    // is still there for a deliberate re-send.
+    const ids = linked.filter((c) => c.pmEmail && !c.emailedAt).map((c) => c.id);
     // Captured before the request: linkFor() reads `gen`, and resolving inside
     // the state updater would read a half-applied version of it.
     const urlById = new Map(linked.map((c) => [c.id, linkFor(c)]));
@@ -832,6 +841,9 @@ function BulkPanel({ notify }: { notify: Notify }) {
           ? `Emailed ${d.sent}; ${failed.length} failed — ${failed[0].title ?? "a project"}: ${failed[0].reason}`
           : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
       );
+      // Pull the persisted send records back, so the badges reflect the database
+      // rather than this session's memory of it.
+      await refresh();
     } catch (e) {
       notify("err", e instanceof Error ? e.message : "Send failed.");
     } finally {
@@ -844,7 +856,7 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // file is not sendable, and a button promising to email 40 that silently
   // reaches 12 is worse than one that says 12.
   const emailablePms = useMemo(
-    () => linked.filter((c) => c.pmEmail).length,
+    () => linked.filter((c) => c.pmEmail && !c.emailedAt).length,
     [linked]
   );
 
@@ -967,7 +979,7 @@ function BulkPanel({ notify }: { notify: Notify }) {
             !emailConfigured
               ? "Email is off — no RESEND_API_KEY on the Worker"
               : emailablePms === 0
-                ? "No linked project has a PM email on file"
+                ? "Nothing left to send — every linked project with a PM email has been emailed"
                 : "Send each linked project's link to its own PM"
           }
           style={{
@@ -1063,8 +1075,16 @@ function BulkPanel({ notify }: { notify: Notify }) {
                   <span className="badge b-amber" style={{ color: "var(--rose)", background: "var(--rose-bg)", borderColor: "var(--rose-line)" }}>
                     {g?.note || "failed"}
                   </span>
-                ) : g?.emailed ? (
-                  <span className="badge b-grn" style={{ gap: 5 }}>
+                ) : g?.emailed || c.emailedAt ? (
+                  <span
+                    className="badge b-grn"
+                    style={{ gap: 5 }}
+                    title={
+                      c.emailedAt
+                        ? `Last emailed ${c.emailedTo ?? ""} on ${new Date(c.emailedAt).toLocaleDateString()}`
+                        : "Emailed just now"
+                    }
+                  >
                     <IconMail /> emailed
                   </span>
                 ) : g?.note ? (

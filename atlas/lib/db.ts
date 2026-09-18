@@ -1196,9 +1196,15 @@ export async function addAlias(nameKey: string, projectId: string): Promise<void
 // is what lets triage decide ownership WITHOUT trusting whoever happens to open
 // the inbox — deriving it at triage time would let a CDS admin turn a
 // Spark-sourced row into a CDS-owned project.
-export async function upsertInboxRow(p: InboxPayload, org: string): Promise<void> {
+export async function upsertInboxRow(
+  p: InboxPayload,
+  org: string
+): Promise<"inserted" | "updated" | "ignored"> {
   const nameKey = matchKey(p.rawName);
-  if (!nameKey) return;
+  // "ignored" rather than a silent void: the caller counts what it queued, and
+  // a name that normalises to nothing was never queued. Reporting it as queued
+  // sends an admin to the inbox looking for a row that does not exist.
+  if (!nameKey) return "ignored";
   if (!ORGS.includes(org as never)) throw new Error(`Unknown org: ${org}`);
   await ensureIngestTables();
   // Keep only present roles, so the jsonb `roles || EXCLUDED.roles` merge below
@@ -1208,7 +1214,7 @@ export async function upsertInboxRow(p: InboxPayload, org: string): Promise<void
     const t = nz(v);
     if (t) cleanRoles[k] = t;
   }
-  await query(
+  const rows = await query<{ inserted: boolean }>(
     `INSERT INTO import_inbox
        (name_key, raw_name, partner, course, term, blurb, pd_url, tech_note, tech, repo_url, roles, org)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
@@ -1228,7 +1234,12 @@ export async function upsertInboxRow(p: InboxPayload, org: string): Promise<void
        repo_url  = COALESCE(EXCLUDED.repo_url,  import_inbox.repo_url),
        roles     = import_inbox.roles || EXCLUDED.roles,
        last_seen = now(),
-       seen_count = import_inbox.seen_count + 1`,
+       seen_count = import_inbox.seen_count + 1
+     -- xmax is 0 on a fresh insert and non-zero when the row already existed,
+     -- which is the only way to tell a NEW inbox row from a re-seen one. The UI
+     -- says "N new inbox rows"; without this every repeat sync would claim the
+     -- whole feed was new.
+     RETURNING (xmax = 0) AS inserted`,
     [
       nameKey,
       p.rawName,
@@ -1244,6 +1255,7 @@ export async function upsertInboxRow(p: InboxPayload, org: string): Promise<void
       org,
     ]
   );
+  return rows[0]?.inserted ? "inserted" : "updated";
 }
 
 interface InboxDbRow {
@@ -2416,6 +2428,18 @@ async function ensureUploadRequestsTable(): Promise<void> {
        review_note  text
      )`
   );
+  // Added after minting and sending became separate actions. Until then a row's
+  // existence implied someone had been asked, because creating a link emailed
+  // the PM in the same click — so created_at was a usable proxy for "asked on".
+  // It is not any more: a generated-but-unsent link is indistinguishable from an
+  // ignored one, which made the approvals queue claim a PM was stalling over
+  // links nobody had sent, and re-sends impossible to see after a page reload.
+  //
+  // last_emailed_to is separate from `recipient`: recipient is the PM resolved
+  // at mint time, while a send can go to an address the admin typed instead.
+  // Overwriting recipient would lose who the link was created for.
+  await query(`ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS last_emailed_at timestamptz`);
+  await query(`ALTER TABLE upload_requests ADD COLUMN IF NOT EXISTS last_emailed_to text`);
   // Indexes for the queue/lookup query patterns (status filter, per-project list,
   // expiry checks). Cheap; matters once there are many requests.
   await query(`CREATE INDEX IF NOT EXISTS idx_upload_requests_status ON upload_requests (status)`);
@@ -2425,6 +2449,8 @@ async function ensureUploadRequestsTable(): Promise<void> {
 }
 
 interface UploadReqRow {
+  last_emailed_at?: string | null;
+  last_emailed_to?: string | null;
   token: string;
   project_id: string;
   project_title?: string;
@@ -2450,11 +2476,29 @@ function rowToUploadRequest(r: UploadReqRow): UploadRequest {
     expiresAt: r.expires_at,
     submittedAt: r.submitted_at,
     reviewNote: r.review_note,
+    emailedAt: r.last_emailed_at ?? null,
+    emailedTo: r.last_emailed_to ?? null,
   };
 }
 
+/**
+ * Record that an invite actually went out.
+ *
+ * Called only after the provider accepts the send. Minting no longer emails, so
+ * this is the ONLY thing that can distinguish "asked and ignored" from "never
+ * asked" — the approvals nudge, the weekly digest and the emailed badge all key
+ * off it.
+ */
+export async function markUploadRequestEmailed(token: string, to: string): Promise<void> {
+  await ensureUploadRequestsTable();
+  await query(
+    `UPDATE upload_requests SET last_emailed_at = now(), last_emailed_to = $2 WHERE token = $1`,
+    [token, to]
+  );
+}
+
 const UPLOAD_REQ_COLS =
-  "token, project_id, recipient, status, images, created_at, expires_at, submitted_at, review_note";
+  "token, project_id, recipient, status, images, created_at, expires_at, submitted_at, review_note, last_emailed_at, last_emailed_to";
 
 export async function createUploadRequest(
   projectId: string,
@@ -2571,6 +2615,7 @@ export async function listUploadRequests(
   const rows = await query<UploadReqRow>(
     `SELECT u.token, u.project_id, u.recipient, u.status, u.images,
             u.created_at, u.expires_at, u.submitted_at, u.review_note,
+            u.last_emailed_at, u.last_emailed_to,
             p.title AS project_title, p.images AS project_images
        FROM upload_requests u
        JOIN projects p ON p.id = u.project_id
@@ -2743,22 +2788,28 @@ export async function listOpenApprovals(scope: {
     `SELECT kind, ref, title, detail, org, waiting_since FROM (
        -- A PM delivered screenshots; an admin has to approve or reject them.
        SELECT 'screenshots'::text AS kind, u.token AS ref, p.title,
-              coalesce(u.recipient, 'someone') || ' sent '
+              coalesce(u.last_emailed_to, u.recipient, 'someone') || ' sent '
                 || coalesce(array_length(u.images, 1), 0)::text || ' image(s)' AS detail,
               p.owner_org AS org, coalesce(u.submitted_at, u.created_at) AS waiting_since
          FROM upload_requests u JOIN projects p ON p.id = u.project_id
         WHERE u.status = 'submitted' AND ($1 OR p.owner_org = $2)
 
        UNION ALL
-       -- Link sent, nothing delivered, and it expires soon. The escalation case:
-       -- silence here looks identical to "not asked yet" unless it's surfaced.
+       -- Link EMAILED, nothing delivered, and it expires soon. The escalation
+       -- case: silence here looks identical to "not asked yet" unless surfaced.
+       --
+       -- Keyed on last_emailed_at, never created_at. Generating a link no longer
+       -- emails anyone, so an unsent link is exactly "not asked yet" — chasing a
+       -- PM over one blames them for an email that was never sent, and this feeds
+       -- the weekly digest, so it escalates by mail too.
        SELECT 'nudge', u.token, p.title,
-              'No upload yet from ' || coalesce(u.recipient, 'the recipient')
+              'No upload yet from ' || coalesce(u.last_emailed_to, u.recipient, 'the recipient')
                 || ' — link expires ' || to_char(u.expires_at, 'Mon DD'),
-              p.owner_org, u.created_at
+              p.owner_org, u.last_emailed_at
          FROM upload_requests u JOIN projects p ON p.id = u.project_id
         WHERE u.status = 'open' AND u.expires_at > now()
-          AND u.created_at < now() - interval '7 days'
+          AND u.last_emailed_at IS NOT NULL
+          AND u.last_emailed_at < now() - interval '7 days'
           AND ($1 OR p.owner_org = $2)
 
        UNION ALL

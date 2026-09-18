@@ -13,7 +13,12 @@
 // The bulk mode exists so "generate links for everything" and "tell everyone"
 // stay two decisions rather than one irreversible click.
 import { requireAdmin, requireProject } from "@/lib/actor";
-import { listUploadRequests, getProjectAdmin, getPeopleMap } from "@/lib/db";
+import {
+  listUploadRequests,
+  getProjectAdmin,
+  getPeopleMap,
+  markUploadRequestEmailed,
+} from "@/lib/db";
 import { sendUploadInvite, emailConfigured } from "@/lib/email";
 import { normalizeName } from "@/lib/gdocs";
 
@@ -93,6 +98,10 @@ export async function POST(req: Request) {
         continue;
       }
       const r = await sendUploadInvite(to, `${base}/contribute/${request.token}`, project.title);
+      // Recorded only on success. Minting does not email, so this is the only
+      // record that anyone was asked — the approvals nudge and the weekly digest
+      // both key off it, and a failed send must not start a 7-day chase clock.
+      if (r.sent) await markUploadRequestEmailed(request.token, to);
       results.push({
         id,
         title: project.title,
@@ -133,6 +142,7 @@ export async function POST(req: Request) {
   }
 
   const r = await sendUploadInvite(email, `${base}/contribute/${request.token}`, project.title);
+  if (r.sent) await markUploadRequestEmailed(request.token, email);
   if (!r.sent) {
     // sendUploadInvite never throws, so an unsent mail arrives here as a reason
     // rather than as a 500 with an empty body.
