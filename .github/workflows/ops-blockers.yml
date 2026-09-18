@@ -1,0 +1,53 @@
+# Unblock loop — see OPS-BLOCKERS.md.
+#
+# Probes the external dependencies nobody on the dev side can configure
+# (Cloudflare secrets, DNS, Resend) and asks for them in Slack once, then
+# closes the ask when the LIVE CHECK passes rather than when someone says it is
+# done. Runs here rather than as a cloud agent so the credentials stay in the
+# repo secrets that already hold them — no new place to trust.
+name: ops blockers
+
+on:
+  schedule:
+    # Every 3 hours. Frequent enough that a fix is noticed the same working day,
+    # rare enough that a long-unanswered ask does not become background noise
+    # (an ask is posted ONCE per blocker regardless — repetition is prevented by
+    # the open issue, not by the interval).
+    - cron: "0 */3 * * *"
+  workflow_dispatch: {}
+
+# Least privilege: it opens and closes issues, nothing else. No contents:write,
+# so a bug here cannot touch the codebase.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # A slow run must not overlap the next schedule and double-post an ask.
+  group: ops-blockers
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Runs first and needs no secrets: if the decision logic is broken, fail
+      # here rather than posting something wrong to Slack.
+      - name: Verify the probe logic
+        run: node scripts/ops-blockers/check.mjs --self-check
+
+      - name: Probe and reconcile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SLACK_OWNER_CLOUDFLARE: ${{ vars.SLACK_OWNER_CLOUDFLARE }}
+          SLACK_OWNER_DNS: ${{ vars.SLACK_OWNER_DNS }}
+          SLACK_OWNER_RESEND: ${{ vars.SLACK_OWNER_RESEND }}
+        run: node scripts/ops-blockers/check.mjs
