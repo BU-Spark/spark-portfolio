@@ -52,6 +52,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Authenticates the in-Worker health check. OPS_HEALTH_TOKEN is
+          # preferred; DIGEST_TOKEN already exists as both a repo secret and a
+          # Worker secret, so the health probes work without a new Cloudflare
+          # change. Both may be unset — the probes then report skipped, which
+          # can neither open nor close an issue.
+          OPS_HEALTH_TOKEN: ${{ secrets.OPS_HEALTH_TOKEN }}
+          DIGEST_TOKEN: ${{ secrets.DIGEST_TOKEN }}
           SLACK_OWNER_CLOUDFLARE: ${{ vars.SLACK_OWNER_CLOUDFLARE }}
           SLACK_OWNER_DNS: ${{ vars.SLACK_OWNER_DNS }}
           SLACK_OWNER_RESEND: ${{ vars.SLACK_OWNER_RESEND }}

@@ -40,6 +40,65 @@ const OWNERS = {
 const mention = (who) => (OWNERS[who] ? `<@${OWNERS[who]}> ` : "");
 
 const ATLAS = process.env.ATLAS_BASE_URL || "https://atlas.buspark.io";
+const INT_ATLAS = process.env.INT_ATLAS_BASE_URL || "https://int.atlas.buspark.io";
+const BOUNTIES = process.env.BOUNTIES_BASE_URL || "https://bounties.buspark.io";
+
+// OPS_HEALTH_TOKEN is preferred; DIGEST_TOKEN already exists as both a Worker
+// secret and a repo secret, so the health probes work today without anyone
+// needing Cloudflare access. See atlas/app/api/ops/health/route.ts.
+const HEALTH_TOKEN = process.env.OPS_HEALTH_TOKEN || process.env.DIGEST_TOKEN || "";
+
+/**
+ * One call to /api/ops/health, shared by every probe that reads from it.
+ *
+ * Memoised because two probes report on different fields of the same response:
+ * calling twice would double the R2 round-trips and could show them disagreeing
+ * if state changed between calls. The promise is cached, not the value, so
+ * concurrent callers await the same request.
+ *
+ * `confirmFailure` wraps the whole call, so a transient is retried before any
+ * sub-check is believed. When the body comes back with `ok: false` the retries
+ * are partly wasted — some sub-check is genuinely failing and will keep
+ * failing — but each probe still reads its OWN field from the final body, so a
+ * broken email check never makes the storage check look red.
+ */
+let healthPromise = null;
+function health() {
+  if (!healthPromise) healthPromise = fetchHealth();
+  return healthPromise;
+}
+
+async function fetchHealth() {
+  if (!HEALTH_TOKEN) return { unavailable: "no OPS_HEALTH_TOKEN or DIGEST_TOKEN for this run" };
+  const out = await confirmFailure(async () => {
+    const res = await fetchWithTimeout(
+      `${ATLAS}/api/ops/health`,
+      { headers: { Authorization: `Bearer ${HEALTH_TOKEN}` } },
+      30000
+    );
+    // 200 and 503 both carry the checks object — 503 just means one failed.
+    // Anything else is the endpoint being absent (not deployed yet), our token
+    // being wrong, or a proxy in the way: all of those are "cannot check",
+    // never "the service is broken". Reporting a 404 as a blocker would page
+    // someone about a route that simply has not shipped.
+    if (res.status !== 200 && res.status !== 503) {
+      return { ok: false, unavailable: `health endpoint returned ${res.status}` };
+    }
+    const body = await res.json();
+    return { ok: body.ok === true, body };
+  });
+  if (!out.body) return { unavailable: out.unavailable || "health endpoint unreachable" };
+  return { body: out.body };
+}
+
+/** Pull one sub-check out of the shared health response. */
+async function healthCheck(name) {
+  const h = await health();
+  if (h.unavailable) return { unavailable: h.unavailable };
+  const check = h.body?.checks?.[name];
+  if (!check) return { unavailable: `health response had no "${name}" check` };
+  return { check };
+}
 
 async function fetchWithTimeout(url, opts = {}, ms = 15000) {
   const ctrl = new AbortController();
@@ -176,6 +235,112 @@ const PROBES = [
         ask: configMissing
           ? "the r2_buckets binding present on the deployed Worker (it lives in atlas/wrangler.jsonc — a deploy replaces bindings, and keep_vars does not protect them)"
           : "the Worker error logs for the /api/img route",
+      };
+    },
+  },
+  {
+    id: "atlas-storage-write",
+    title: "atlas cannot write to object storage",
+    owner: "cloudflare",
+    // The read probe above proves storage answers; this proves it ACCEPTS a
+    // write. They are different failures: the outage this was built after had
+    // working reads the whole time. Runs inside the Worker, so it also sees
+    // whether the native binding served the write or the S3 API did — the
+    // latter is a latent outage, because that path's errors cannot be
+    // constructed on workerd and surface as a bare 1101.
+    dependsOn: "atlas-up",
+    async run() {
+      const { check, unavailable } = await healthCheck("storage");
+      if (unavailable) return { skipped: unavailable };
+      if (check.ok) return { ok: true };
+      return {
+        ok: false,
+        detail: `POST ${ATLAS}/api/ops/health reported storage not ok: ${check.reason} (backend: ${check.backend}). The write path is exercised in-Worker: put, read back, compare, delete.`,
+        slack: `atlas cannot write to R2: ${check.reason}. Needs: the r2_buckets binding present on the deployed spark-portfolio Worker, and an R2 token with Object Read & Write.`,
+        ask: "the r2_buckets binding on the deployed Worker (it lives in atlas/wrangler.jsonc — a deploy replaces bindings, and keep_vars does not protect them) and a read-write R2 token",
+      };
+    },
+  },
+  {
+    id: "atlas-worker-email",
+    title: "the Worker's Resend key is not working",
+    owner: "resend",
+    // Distinct from the resend-key probe below, which checks the copy in GitHub
+    // secrets. This one asks the Worker about ITS key — the exact thing that
+    // was silently dead while a valid key sat in local and repo config, and
+    // which emailConfigured() cannot detect because it only checks existence.
+    dependsOn: "atlas-up",
+    async run() {
+      const { check, unavailable } = await healthCheck("email");
+      if (unavailable) return { skipped: unavailable };
+      if (check.ok) return { ok: true };
+      // Resend being down is not our blocker; the health route flags that.
+      if (check.theirFault) return { skipped: `Resend side: ${check.reason}` };
+      return {
+        ok: false,
+        detail: `The Worker reports its Resend credentials unusable: ${check.reason}. This is the Worker's own key, not the copy in repo secrets — those can differ, and did.`,
+        slack: `atlas Worker's Resend key not working: ${check.reason}. Needs: a valid RESEND_API_KEY set as a secret on the spark-portfolio Worker in Cloudflare.`,
+        ask: "a working RESEND_API_KEY secret on the spark-portfolio Worker",
+      };
+    },
+  },
+  {
+    id: "atlas-database",
+    title: "atlas cannot reach its database",
+    owner: "cloudflare",
+    // Needs no DATABASE_URL here: the Worker runs the query through its own
+    // Hyperdrive binding and reports only whether it succeeded, so CI never
+    // holds a database credential.
+    dependsOn: "atlas-up",
+    async run() {
+      const { check, unavailable } = await healthCheck("database");
+      if (unavailable) return { skipped: unavailable };
+      if (check.ok) return { ok: true };
+      return {
+        ok: false,
+        detail: `The Worker could not run a trivial SELECT: ${check.reason}. Usually the Hyperdrive binding or the Railway database, not the app.`,
+        slack: `atlas cannot reach Postgres: ${check.reason}. Needs: the Hyperdrive binding on the Worker checked, and the Railway database confirmed up.`,
+        ask: "the HYPERDRIVE binding on the deployed Worker, and the Railway Postgres instance",
+      };
+    },
+  },
+  {
+    id: "int-up",
+    title: "int.atlas.buspark.io is not serving",
+    owner: "cloudflare",
+    // Staging is where a bad deploy should be caught first. Lower stakes than
+    // prod, so it gets its own probe rather than being folded into atlas-up —
+    // otherwise one message would conflate "staging is broken" with "the site
+    // is down".
+    async run() {
+      const out = await confirmFailure(async () => {
+        const res = await fetchWithTimeout(`${INT_ATLAS}/`);
+        return res.ok ? { ok: true } : { ok: false, status: res.status };
+      });
+      if (out.ok) return { ok: true };
+      return {
+        ok: false,
+        detail: `GET ${INT_ATLAS}/ returned ${out.status} on all ${out.attempts} samples across two windows.`,
+        slack: `int.atlas.buspark.io (staging) returning ${out.status}. Needs: the spark-portfolio-int Worker deploy checked. Production is unaffected.`,
+        ask: "the spark-portfolio-int Worker's latest deploy",
+      };
+    },
+  },
+  {
+    id: "bounties-up",
+    title: "bounties.buspark.io is not serving",
+    owner: "cloudflare",
+    async run() {
+      const out = await confirmFailure(async () => {
+        const res = await fetchWithTimeout(`${BOUNTIES}/`);
+        return res.ok ? { ok: true } : { ok: false, status: res.status };
+      });
+      if (out.ok) return { ok: true };
+      return {
+        ok: false,
+        detail: `GET ${BOUNTIES}/ returned ${out.status} on all ${out.attempts} samples across two windows.`,
+        slack: `bounties.buspark.io returning ${out.status}. Needs: the bounties-site Worker deploy checked.`,
+        ask: "the bounties-site Worker's latest deploy",
       };
     },
   },
@@ -390,6 +555,11 @@ async function selfCheck() {
     "Resend API key rejected (401). Needs: a new key, set as RESEND_API_KEY on the spark-portfolio Worker and as a repo secret.",
     "buspark.io missing from Resend. Needs: the domain added in Resend, then its DNS records published.",
     "buspark.io unverified in Resend (pending). Needs: DNS records TXT resend._domainkey, MX send, TXT send published on buspark.io.",
+    "atlas cannot write to R2: write rejected by the bucket. Needs: the r2_buckets binding present on the deployed spark-portfolio Worker, and an R2 token with Object Read & Write.",
+    "atlas Worker's Resend key not working: key rejected (401). Needs: a valid RESEND_API_KEY set as a secret on the spark-portfolio Worker in Cloudflare.",
+    "atlas cannot reach Postgres: query failed. Needs: the Hyperdrive binding on the Worker checked, and the Railway database confirmed up.",
+    "int.atlas.buspark.io (staging) returning 500. Needs: the spark-portfolio-int Worker deploy checked. Production is unaffected.",
+    "bounties.buspark.io returning 500. Needs: the bounties-site Worker deploy checked.",
   ];
   for (const s of SAMPLES) {
     assert(wordCount(s) <= WORD_LIMIT, `slack line over ${WORD_LIMIT} words (${wordCount(s)}): ${s}`);
