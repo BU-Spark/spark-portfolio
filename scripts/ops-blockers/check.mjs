@@ -81,12 +81,30 @@ async function fetchHealth() {
     // being wrong, or a proxy in the way: all of those are "cannot check",
     // never "the service is broken". Reporting a 404 as a blocker would page
     // someone about a route that simply has not shipped.
+    // 401 means our token and the Worker's disagree. That is NOT "cannot check"
+    // — it is a real misconfiguration with a real owner, and treating it as
+    // unknown means it stays silent forever, which is exactly what happened.
+    if (res.status === 401) {
+      return { ok: false, misconfigured: "the health endpoint rejected our token (401)" };
+    }
     if (res.status !== 200 && res.status !== 503) {
       return { ok: false, unavailable: `health endpoint returned ${res.status}` };
     }
     const body = await res.json();
+    // The Worker telling us it has no token is an ASK, not an unknown.
+    if (body.unconfigured) {
+      return { ok: false, misconfigured: "no OPS_HEALTH_TOKEN or DIGEST_TOKEN is set on the Worker" };
+    }
+    // A body with no `checks` is one this probe does not understand — an older
+    // deploy of the route, or something else answering on that path. It must
+    // never read as healthy: on the first live run the pre-fix route returned
+    // exactly this and atlas-health reported OK while every check was blind.
+    if (!body.checks || typeof body.checks !== "object") {
+      return { ok: false, unavailable: "health response had no checks object" };
+    }
     return { ok: body.ok === true, body };
   });
+  if (out.misconfigured) return { misconfigured: out.misconfigured };
   if (!out.body) return { unavailable: out.unavailable || "health endpoint unreachable" };
   return { body: out.body };
 }
@@ -94,6 +112,9 @@ async function fetchHealth() {
 /** Pull one sub-check out of the shared health response. */
 async function healthCheck(name) {
   const h = await health();
+  // A misconfigured endpoint is reported once, by the atlas-health probe. The
+  // probes that read from it stay quiet rather than each repeating the same ask.
+  if (h.misconfigured) return { unavailable: `health endpoint unusable: ${h.misconfigured}` };
   if (h.unavailable) return { unavailable: h.unavailable };
   const check = h.body?.checks?.[name];
   if (!check) return { unavailable: `health response had no "${name}" check` };
@@ -199,6 +220,35 @@ const PROBES = [
     },
   },
   {
+    id: "atlas-health",
+    title: "the atlas health endpoint cannot be used",
+    owner: "cloudflare",
+    // The probe that exists because its absence was invisible. Every in-Worker
+    // check reads from /api/ops/health, and when that endpoint had no token the
+    // checks reported "cannot check" — which is deliberately silent. So the one
+    // condition needing Cloudflare access produced no ask, on the system built
+    // to ask for Cloudflare access.
+    //
+    // Deliberately NOT raised for a 404 or a timeout: those are a deploy in
+    // flight or a network blip, and paging someone over them is how an alert
+    // channel earns a mute. Only a definite, actionable misconfiguration.
+    dependsOn: "atlas-up",
+    async run() {
+      const h = await health();
+      if (h.misconfigured) {
+        return {
+          ok: false,
+          detail: `GET ${ATLAS}/api/ops/health is unusable: ${h.misconfigured}. Every in-Worker check (R2 writes, the Worker's Resend key, database reachability) is blind until this is fixed. The same secret gates the weekly digest, which cannot authenticate either.`,
+          slack: `atlas health checks are blind: ${h.misconfigured}. Needs: DIGEST_TOKEN (or OPS_HEALTH_TOKEN) set as a secret on the spark-portfolio Worker. This also blocks the weekly digest.`,
+          ask: "DIGEST_TOKEN or OPS_HEALTH_TOKEN set as a secret on the spark-portfolio Worker in Cloudflare",
+        };
+      }
+      // Unreachable or not yet deployed is genuinely unknown, not a blocker.
+      if (h.unavailable) return { skipped: h.unavailable };
+      return { ok: true };
+    },
+  },
+  {
     id: "atlas-storage",
     title: "atlas object storage is not answering cleanly",
     owner: "cloudflare",
@@ -248,7 +298,7 @@ const PROBES = [
     // whether the native binding served the write or the S3 API did — the
     // latter is a latent outage, because that path's errors cannot be
     // constructed on workerd and surface as a bare 1101.
-    dependsOn: "atlas-up",
+    dependsOn: "atlas-health",
     async run() {
       const { check, unavailable } = await healthCheck("storage");
       if (unavailable) return { skipped: unavailable };
@@ -269,7 +319,7 @@ const PROBES = [
     // secrets. This one asks the Worker about ITS key — the exact thing that
     // was silently dead while a valid key sat in local and repo config, and
     // which emailConfigured() cannot detect because it only checks existence.
-    dependsOn: "atlas-up",
+    dependsOn: "atlas-health",
     async run() {
       const { check, unavailable } = await healthCheck("email");
       if (unavailable) return { skipped: unavailable };
@@ -291,7 +341,7 @@ const PROBES = [
     // Needs no DATABASE_URL here: the Worker runs the query through its own
     // Hyperdrive binding and reports only whether it succeeded, so CI never
     // holds a database credential.
-    dependsOn: "atlas-up",
+    dependsOn: "atlas-health",
     async run() {
       const { check, unavailable } = await healthCheck("database");
       if (unavailable) return { skipped: unavailable };
@@ -580,6 +630,22 @@ async function selfCheck() {
     );
   }
 
+  // Suppression must be transitive: a probe suppressed by its parent has to
+  // suppress its own children, or one root cause is reported three times under
+  // three names. This asserts the chain shape the runner relies on.
+  const chain = PROBES.filter((x) => x.dependsOn).map((x) => [x.id, x.dependsOn]);
+  for (const [id, dep] of chain) {
+    const parent = PROBES.find((x) => x.id === dep);
+    if (parent?.dependsOn) {
+      const grand = PROBES.find((x) => x.id === parent.dependsOn);
+      assert(grand, `${id} → ${dep} → ${parent.dependsOn}, which does not exist`);
+      assert(
+        PROBES.indexOf(grand) < PROBES.indexOf(parent),
+        `${parent.dependsOn} must run before ${dep}`
+      );
+    }
+  }
+
   // A transient failure that clears in the second window is NOT reported.
   let n = 0;
   const transient = async () => ({ ok: ++n > 4 });
@@ -606,15 +672,21 @@ async function main() {
   }
 
   const results = [];
-  const blockedIds = new Set();
+  // Blocked OR suppressed. Suppression has to be transitive now that the chain
+  // is two deep (atlas-up → atlas-health → the in-Worker checks): if only truly
+  // blocked probes suppressed their dependents, a probe suppressed by its own
+  // parent would still let ITS children run and re-report the same root cause
+  // under three different names.
+  const unrunnableIds = new Set();
   // PROBES is ordered so a dependency runs before anything depending on it.
   for (const probe of PROBES) {
     let result;
-    if (probe.dependsOn && blockedIds.has(probe.dependsOn)) {
+    if (probe.dependsOn && unrunnableIds.has(probe.dependsOn)) {
       // Do not even run it: a dependent probe failing while its dependency is
       // down tells us nothing, and reporting both would ping twice for one
       // cause and point at the wrong fix.
-      result = { skipped: `suppressed — ${probe.dependsOn} is blocked, so this would be a symptom` };
+      result = { skipped: `suppressed — ${probe.dependsOn} is not healthy, so this would be a symptom` };
+      unrunnableIds.add(probe.id);
     } else {
       try {
         result = await probe.run();
@@ -624,7 +696,7 @@ async function main() {
         result = { skipped: `probe threw: ${e instanceof Error ? e.message : String(e)}` };
       }
     }
-    if (!result.ok && !result.skipped) blockedIds.add(probe.id);
+    if (!result.ok) unrunnableIds.add(probe.id);
     results.push({ probe, result });
     const state = result.skipped ? `SKIP (${result.skipped})` : result.ok ? "OK" : "BLOCKED";
     console.log(`${state.padEnd(10)} ${probe.id}${result.detail ? ` — ${result.detail}` : ""}`);

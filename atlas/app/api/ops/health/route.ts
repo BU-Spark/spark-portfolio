@@ -167,8 +167,16 @@ async function run(req: Request): Promise<Response> {
   // writes to the bucket and makes an authenticated call on the Worker's
   // behalf, so an unguarded version is worse than an absent one.
   if (!token) {
+    // `unconfigured` is a machine-readable marker, not decoration. Without it
+    // the probe sees a 503 whose body has no `checks` and classifies the run as
+    // "could not check" — which is silent by design, so the one condition that
+    // needs someone with Cloudflare access produced no ask at all.
     return Response.json(
-      { error: "Health check is not configured (set OPS_HEALTH_TOKEN or DIGEST_TOKEN)." },
+      {
+        ok: false,
+        unconfigured: true,
+        error: "Health check is not configured (set OPS_HEALTH_TOKEN or DIGEST_TOKEN on the Worker).",
+      },
       { status: 503, headers: { "Cache-Control": "no-store" } }
     );
   }
