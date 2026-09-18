@@ -48,6 +48,40 @@ The loop never needs to read replies, because it verifies the system instead.
 **Least-privilege token.** `contents: read`, `issues: write`. A bug here cannot
 modify the codebase.
 
+## What each probe proves
+
+| Probe | Checks | Catches |
+|---|---|---|
+| `atlas-up` | `GET /` serves | The site being down |
+| `atlas-storage` | `GET /api/img/<nonexistent>` returns 404 | Storage unreachable, or the Worker throwing instead of reporting a miss |
+| `atlas-storage-write` | In-Worker put → read back → compare → delete | A rejected **write**, and the S3-API fallback silently replacing the binding |
+| `atlas-worker-email` | The **Worker's own** Resend key is accepted | A revoked key on the Worker while a valid one sits in repo config |
+| `atlas-database` | The Worker runs `SELECT 1` | A broken Hyperdrive binding or a down database — with no DB credential in CI |
+| `int-up` | staging serves | A bad deploy, before it reaches production |
+| `bounties-up` | `bounties.buspark.io` serves | That Worker being down |
+| `resend-key` | The **repo's** Resend key is accepted | A revoked key in CI |
+| `resend-domain` | `buspark.io` is `verified` | Mail that would be rejected on every send |
+
+The last three probes in the alerting chain exist because **reads, writes, and
+credentials fail independently.** Both outages this was built after had healthy
+reads throughout: one was a failing write the AWS SDK could not report on
+workerd, the other a dead key on the Worker while a good one sat in repo config.
+A probe that only reads from outside would have shown green through both.
+
+## What this still does NOT check
+
+Stated explicitly so nobody mistakes a green board for full coverage:
+
+- **Whether mail actually lands in an inbox.** A verified domain and a valid key
+  do not prove delivery.
+- **hub.buspark.io**, and every bounties route beyond the homepage.
+- **`EVENTBRITE_TOKEN`** on bounties — the Events page will stay empty without
+  it and nothing here notices.
+- **Certificate and domain expiry**, DNS drift, and anything Cloudflare-account
+  level.
+- **Correctness of anything.** These are liveness and credential checks; a site
+  serving the wrong data passes every one of them.
+
 ## Setup
 
 Repo **secrets** (Settings → Secrets and variables → Actions):
@@ -56,6 +90,8 @@ Repo **secrets** (Settings → Secrets and variables → Actions):
 |---|---|
 | `SLACK_WEBHOOK_URL` | Incoming webhook, bound to the one channel asks go to |
 | `RESEND_API_KEY` | Lets the Resend probes run; without it they report `skipped` |
+| `DIGEST_TOKEN` | Already present for the weekly digest. Doubles as the health-endpoint credential, so the in-Worker probes work with no Cloudflare change |
+| `OPS_HEALTH_TOKEN` | Optional and preferred. Set it on the Worker **and** here to stop the digest token doubling as the health credential |
 
 Repo **variables** (not secrets — Slack member IDs are not sensitive):
 

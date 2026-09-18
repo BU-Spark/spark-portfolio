@@ -57,6 +57,21 @@ async function r2(): Promise<R2Bucket | undefined> {
  *  misconfiguration from a genuinely absent object. */
 export class S3ConfigError extends Error {}
 
+/**
+ * Which path a write would actually take right now.
+ *
+ * Exists for the ops health check: in production the binding must serve every
+ * request, and silently falling back to the S3 API is itself a problem worth
+ * reporting — that fallback is the code path whose errors cannot be constructed
+ * on workerd (no DOMParser), which is how a storage failure became a blank 500
+ * for days. "It works" and "it works for the right reason" are different
+ * answers, and only the second one stays true.
+ */
+export async function storageBackend(): Promise<"binding" | "s3-api" | "unconfigured"> {
+  if (await r2()) return "binding";
+  return process.env.R2_ENDPOINT && process.env.R2_BUCKET ? "s3-api" : "unconfigured";
+}
+
 const globalForS3 = globalThis as unknown as { sparkS3?: S3Client };
 
 function getClient(): S3Client {
