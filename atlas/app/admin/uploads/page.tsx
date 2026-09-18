@@ -762,7 +762,15 @@ function BulkPanel({ notify }: { notify: Notify }) {
       notify("ok", `Emailed ${d.to}.`);
       setGen((prev) => ({
         ...prev,
-        [c.id]: { ...(prev[c.id] || { id: c.id, emailed: false, status: "created" }), emailed: true },
+        [c.id]: {
+          ...(prev[c.id] || { id: c.id, status: "created" }),
+          // Carry the link through. A row whose link already existed has no
+          // entry here, and an entry with no `url` is what the list treats as a
+          // FAILED generation — so synthesizing one without it made a
+          // successful send render as a failure.
+          url: prev[c.id]?.url ?? linkFor(c) ?? undefined,
+          emailed: true,
+        },
       }));
     } catch (e) {
       notify("err", e instanceof Error ? e.message : "Send failed.");
@@ -775,6 +783,9 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // generating is reversible and private, sending is neither.
   const emailAllPms = async () => {
     const ids = linked.filter((c) => c.pmEmail).map((c) => c.id);
+    // Captured before the request: linkFor() reads `gen`, and resolving inside
+    // the state updater would read a half-applied version of it.
+    const urlById = new Map(linked.map((c) => [c.id, linkFor(c)]));
     if (!ids.length) {
       notify("err", "No linked projects have a PM email on file.");
       return;
@@ -799,7 +810,13 @@ function BulkPanel({ notify }: { notify: Notify }) {
         const next = { ...prev };
         for (const r of d.results as { id: string; sent: boolean }[]) {
           if (r.sent) {
-            next[r.id] = { ...(next[r.id] || { id: r.id, status: "created" }), emailed: true };
+            next[r.id] = {
+              ...(next[r.id] || { id: r.id, status: "created" }),
+              // See the note in emailLink: an entry without a url renders as a
+              // failed generation, so the existing link has to come with it.
+              url: next[r.id]?.url ?? urlById.get(r.id) ?? undefined,
+              emailed: true,
+            };
           }
         }
         return next;
@@ -1011,7 +1028,11 @@ function BulkPanel({ notify }: { notify: Notify }) {
             const url = linkFor(c);
             const g = gen[c.id];
             const isLinked = !!url;
-            const failed = g && !g.url && g.status !== "skipped-existing";
+            // `failed` means a GENERATE produced no link. A successful send can
+            // never be one, whatever else is missing from the entry — without
+            // this guard, any future code path that records a send without a
+            // url silently paints the row red again.
+            const failed = g && !g.url && !g.emailed && g.status !== "skipped-existing";
             return (
               <div
                 key={c.id}
