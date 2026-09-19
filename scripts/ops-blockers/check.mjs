@@ -159,7 +159,11 @@ async function sampleUntilOk(check, attempts = 4, delayMs = 3000) {
     if (i) await new Promise((r) => setTimeout(r, delayMs));
     try {
       last = await check();
-      if (last.ok) return { ok: true, attempts: i + 1 };
+      // Spread the result, never rebuild it: the health probes return a body on
+      // success, and a bare `{ ok: true }` here dropped it — so every healthy
+      // response from the health endpoint was reported as "unreachable", and
+      // the in-Worker checks never worked on a working system.
+      if (last.ok) return { ...last, ok: true, attempts: i + 1 };
     } catch (e) {
       last = { ok: false, detail: e instanceof Error ? e.message : String(e) };
     }
@@ -580,6 +584,12 @@ async function selfCheck() {
   const recovered = await sampleUntilOk(flaky, 4, 0);
   assert(recovered.ok === true, "a probe that passes on retry is green");
   assert(calls === 2, "sampling stops at the first success");
+
+  // A successful sample must keep whatever the check returned alongside `ok`.
+  // This is the bug that made every healthy health-endpoint response look
+  // like an outage.
+  const payload = await sampleUntilOk(async () => ({ ok: true, body: { checks: {} } }), 1, 0);
+  assert(payload.ok === true && payload.body && "checks" in payload.body, "success keeps the payload");
 
   calls = 0;
   const dead = async () => ({ ok: false, detail: "500" });
