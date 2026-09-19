@@ -1,0 +1,76 @@
+# Merge labelled PRs once their checks are green — on GitHub's servers.
+#
+# WHY: repository auto-merge (`gh pr merge --auto`) is disabled at the repo
+# level and enabling it needs admin, which nobody on the dev side has. The
+# alternative was a local `while … sleep 30` loop polling `gh pr checks`, which
+# died every time the laptop closed mid-run — twice, leaving green PRs unmerged
+# overnight. This does the same thing where a closed lid cannot reach it.
+#
+# WHAT IT MERGES: only PRs that carry the `automerge` label AND come from a
+# branch in this repository (never a fork). The label can only be applied by
+# someone with triage access, so the label is the authorisation. Removing it
+# withdraws consent; the workflow does nothing.
+#
+# WHEN IT MERGES: the same rule the local loop used — at least four checks have
+# registered (CI's three jobs plus CodeRabbit; the Cloudflare Workers Builds
+# register after those), none are pending, none have failed. A PR with a failed
+# check is left open and untouched, never retried.
+#
+# Runs every 10 minutes rather than on check events: the Cloudflare checks are
+# external and do not fire workflow_run, and a cron is one code path instead of
+# three event shapes that each have to agree on "all green".
+#
+# SECURITY: nothing from github.event.* is interpolated anywhere. The only
+# expression is github.repository, passed through env. PR numbers come from the
+# API as integers.
+name: automerge
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge labelled PRs whose checks are all green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prs=$(gh pr list --repo "$REPO" --label automerge --state open \
+                  --json number,isCrossRepository \
+                  --jq '.[] | select(.isCrossRepository == false) | .number')
+          if [ -z "$prs" ]; then
+            echo "nothing labelled automerge"
+            exit 0
+          fi
+          for pr in $prs; do
+            checks=$(gh pr checks "$pr" --repo "$REPO" --json name,state 2>/dev/null || echo "[]")
+            total=$(echo "$checks" | jq 'length')
+            failed=$(echo "$checks" | jq '[.[] | select(.state == "FAILURE" or .state == "ERROR" or .state == "CANCELLED" or .state == "TIMED_OUT")] | length')
+            pending=$(echo "$checks" | jq '[.[] | select(.state == "PENDING" or .state == "IN_PROGRESS" or .state == "QUEUED" or .state == "EXPECTED")] | length')
+            if [ "$failed" -gt 0 ]; then
+              echo "#$pr: $failed failed check(s) — leaving open"
+              continue
+            fi
+            if [ "$total" -lt 4 ] || [ "$pending" -gt 0 ]; then
+              echo "#$pr: $total registered, $pending pending — not yet"
+              continue
+            fi
+            if gh pr merge "$pr" --repo "$REPO" --squash --delete-branch; then
+              echo "#$pr: merged"
+            else
+              echo "#$pr: merge refused (conflict or protection) — leaving open"
+            fi
+          done
