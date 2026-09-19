@@ -71,11 +71,15 @@ function health() {
 async function fetchHealth() {
   if (!HEALTH_TOKEN) return { unavailable: "no OPS_HEALTH_TOKEN or DIGEST_TOKEN for this run" };
   const out = await confirmFailure(async () => {
+    const started = Date.now();
     const res = await fetchWithTimeout(
       `${ATLAS}/api/ops/health`,
       { headers: { Authorization: `Bearer ${HEALTH_TOKEN}` } },
-      30000
+      // The endpoint does an R2 round-trip, a Resend call and a DB query on a
+      // possibly cold isolate. 30s was not obviously enough from CI.
+      60000
     );
+    console.log(`  (health endpoint answered ${res.status} in ${Date.now() - started}ms)`);
     // 200 and 503 both carry the checks object — 503 just means one failed.
     // Anything else is the endpoint being absent (not deployed yet), our token
     // being wrong, or a proxy in the way: all of those are "cannot check",
@@ -105,7 +109,13 @@ async function fetchHealth() {
     return { ok: body.ok === true, body };
   });
   if (out.misconfigured) return { misconfigured: out.misconfigured };
-  if (!out.body) return { unavailable: out.unavailable || "health endpoint unreachable" };
+  // Keep the thrown reason. A fetch that throws (timeout, DNS, reset) lands in
+  // `detail`, and dropping it left three scheduled runs saying only
+  // "unreachable" while the endpoint answered 200 in a second from a laptop —
+  // no way to tell a runner-side timeout from a network block from the logs.
+  if (!out.body) {
+    return { unavailable: out.unavailable || `health endpoint unreachable: ${out.detail ?? "no reason captured"}` };
+  }
   return { body: out.body };
 }
 
