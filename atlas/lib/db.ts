@@ -76,8 +76,20 @@ async function acquireClient(): Promise<{ client: DatabaseClient; release: () =>
     // Hyperdrive owns the origin-side pool. Do not retain a pg Pool in the
     // Worker isolate: its stale client sockets cause intermittent 1101 errors.
     const client = new Client({ connectionString: hyperdriveConnectionString });
+    // pg reports socket-level failures (Hyperdrive resetting an idle
+    // connection, a close racing our own end()) as an 'error' EVENT, not
+    // through the awaited promise. A Pool attaches this listener for you; a
+    // bare Client does not, and with none attached Node rethrows the event as
+    // an uncaught exception — which on Workers is a blank "Error 1101" for
+    // whoever's request is in flight. Log it; the awaited call still rejects
+    // on its own and goes through the retry path in query().
+    client.on("error", (error) => {
+      console.warn("Postgres client error", dbErrorFields(error));
+    });
     await client.connect();
-    return { client, release: () => client.end() };
+    // Best-effort close: a socket that is already gone rejects here, and that
+    // must not replace the real query result in runStatement's finally.
+    return { client, release: () => client.end().catch(() => {}) };
   }
 
   const client = await getPool().connect();
