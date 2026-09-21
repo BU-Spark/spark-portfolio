@@ -43,9 +43,12 @@ export default function ImageSlot({
   aspectRatio = "4 / 3",
   style,
   endpoint = "/api/upload",
+  max = 1,
 }: {
   value: string | null; // stored S3 key (or null)
-  onChange: (key: string | null) => void;
+  // `nth` is the file's position within one drop (0 for a single file), so a
+  // parent with fixed slots can put the first on this slot and the rest after.
+  onChange: (key: string | null, nth?: number) => void;
   placeholder?: string;
   radius?: number;
   aspectRatio?: string;
@@ -53,6 +56,9 @@ export default function ImageSlot({
   // Upload endpoint. Defaults to the admin route; the token-gated PM uploader
   // passes /api/contribute/<token>. Both accept { dataUrl } and return { key }.
   endpoint?: string;
+  // How many files one drop/pick may bring in. Each is uploaded in turn and
+  // onChange fires once per key; the parent decides where the extras go.
+  max?: number;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -63,35 +69,48 @@ export default function ImageSlot({
   const inputId = useId();
 
   const ingest = useCallback(
-    async (file: File | undefined) => {
+    async (list: FileList | null | undefined) => {
       setError(null);
-      if (!file || ACCEPT.indexOf(file.type) < 0) {
+      const files = Array.from(list ?? []).filter((f) => ACCEPT.indexOf(f.type) >= 0);
+      if (!files.length) {
         setError("Drop a PNG, JPEG, WebP, or AVIF image.");
         return;
       }
+      if (files.length > max) {
+        setError(max === 1 ? "One image at a time here." : `Only ${max} more can be added.`);
+      }
+      setUploading(true);
       try {
-        const dataUrl = await toDataUrl(file);
-        setPreview(dataUrl); // instant preview while uploading
-        setUploading(true);
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ dataUrl }),
-        });
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: "" }));
-          throw new Error(error || `Upload failed (${res.status})`);
+        // Sequential on purpose: the token endpoint appends atomically against a
+        // cap, and parallel posts would race each other for the last slot.
+        for (const [nth, file] of files.slice(0, max).entries()) {
+          try {
+            const dataUrl = await toDataUrl(file);
+            setPreview(dataUrl); // instant preview while uploading
+            const res = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ dataUrl }),
+            });
+            if (!res.ok) {
+              const { error } = await res.json().catch(() => ({ error: "" }));
+              throw new Error(error || `Upload failed (${res.status})`);
+            }
+            const { key } = await res.json();
+            onChange(key, nth);
+          } catch (e) {
+            setPreview(null);
+            setError(e instanceof Error ? e.message : "Upload failed.");
+          }
         }
-        const { key } = await res.json();
-        onChange(key);
-      } catch (e) {
-        setPreview(null);
-        setError(e instanceof Error ? e.message : "Upload failed.");
       } finally {
+        // The parent now owns the key (or refetched it), so drop the local copy
+        // — otherwise a slot whose value stays null shows the image twice.
+        setPreview(null);
         setUploading(false);
       }
     },
-    [onChange, endpoint]
+    [onChange, endpoint, max]
   );
 
   const displaySrc = preview ?? (value ? keyToUrl(value) : null);
@@ -111,7 +130,7 @@ export default function ImageSlot({
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        ingest(e.dataTransfer.files?.[0]);
+        ingest(e.dataTransfer.files);
       }}
       style={{
         position: "relative",
@@ -252,8 +271,9 @@ export default function ImageSlot({
         type="file"
         accept={ACCEPT.join(",")}
         hidden
+        multiple={max > 1}
         onChange={(e) => {
-          ingest(e.target.files?.[0]);
+          ingest(e.target.files);
           e.target.value = "";
         }}
       />

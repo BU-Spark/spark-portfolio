@@ -614,11 +614,15 @@ export default function EditProjectPage() {
       >
     ) =>
       setForm((f) => (f ? { ...f, [k]: e.target.value } : f));
-  const setImage = (i: number) => (key: string | null) =>
+  const setImage = (i: number) => (key: string | null, nth = 0) =>
     setForm((f) => {
       if (!f) return f;
       const images = [...f.images];
-      images[i] = key;
+      // A multi-file drop calls this once per key: the first (nth 0) lands on
+      // the slot it was dropped on — so Replace still replaces — and the rest
+      // fill the next empty slots. Extras past the last empty slot are dropped.
+      const at = nth === 0 ? i : images.findIndex((k, j) => j > i && !k);
+      if (at >= 0) images[at] = key;
       return { ...f, images };
     });
 
@@ -1400,6 +1404,7 @@ export default function EditProjectPage() {
                 radius={10}
                 aspectRatio="16 / 11"
                 style={{ gridRow: "span 2" }}
+                max={4}
               />
               <ImageSlot
                 value={form.images[1]}
@@ -1425,7 +1430,7 @@ export default function EditProjectPage() {
               />
             </div>
             <div style={S.hint}>
-              Drag an image onto each slot (or click to browse). The first is the cover; up to four show in the detail view.
+              Drop several images on the cover slot to fill the empty ones in order, or one onto each slot. The first is the cover; up to four show in the detail view.
             </div>
           </div>
           <RequestUpload projectId={id} />
