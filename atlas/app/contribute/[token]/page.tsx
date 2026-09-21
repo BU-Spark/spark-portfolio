@@ -134,18 +134,9 @@ export default async function ContributePage({
     );
   }
 
-  if (reqRow.status === "submitted") {
-    return (
-      <Shell>
-        <Notice
-          title="Submitted for review"
-          body={`Thanks! Your screenshots for "${project.title}" are with the BU Spark! team for review. You'll see them on the project page once approved. You can close this tab.`}
-        />
-      </Shell>
-    );
-  }
-
-  // status === 'open' and live → show the uploader. Pass ONLY public-safe fields.
+  // 'open' or 'submitted' → the client handles both (the submitted view carries
+  // a "forgot one? reopen" button, so a forwarded link that a teammate already
+  // submitted is not a dead end). Pass ONLY public-safe fields.
   return (
     <Shell>
       <UploadClient
@@ -154,6 +145,7 @@ export default async function ContributePage({
         projectBlurb={project.blurb}
         initialImages={reqRow.images}
         reviewNote={reqRow.reviewNote}
+        initialSubmitted={reqRow.status === "submitted"}
       />
     </Shell>
   );

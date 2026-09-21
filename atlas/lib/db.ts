@@ -2591,6 +2591,22 @@ export async function submitUploadRequest(token: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+// PM reopens their own submission ("forgot one"). Same transition as reject but
+// self-service and note-free: back to 'open' with the images kept, so the link
+// keeps working for everyone it was forwarded to. Refuses once approved — those
+// images are already on the project — and after expiry.
+export async function reopenUploadRequest(token: string): Promise<boolean> {
+  await ensureUploadRequestsTable();
+  const rows = await query<{ token: string }>(
+    `UPDATE upload_requests
+       SET status = 'open', submitted_at = NULL
+     WHERE token = $1 AND status = 'submitted' AND expires_at > now()
+     RETURNING token`,
+    [token]
+  );
+  return rows.length > 0;
+}
+
 // Admin queue. Joins the project title + its current images (raw keys) so the
 // review UI can offer the full union (existing ∪ pending) to choose from.
 // Org-filtered: the queue exposes external recipient emails, and it is a WORKLIST
