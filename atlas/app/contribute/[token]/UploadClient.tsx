@@ -16,18 +16,21 @@ export default function UploadClient({
   projectBlurb,
   initialImages,
   reviewNote,
+  initialSubmitted = false,
 }: {
   token: string;
   projectTitle: string;
   projectBlurb: string;
   initialImages: string[];
   reviewNote: string | null;
+  initialSubmitted?: boolean;
 }) {
   const endpoint = `/api/contribute/${token}`;
   const [images, setImages] = useState<string[]>(initialImages);
   const [busy, setBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(initialSubmitted);
+  const [reopening, setReopening] = useState(false);
   const [gone, setGone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +88,24 @@ export default function UploadClient({
     }
   }, [endpoint]);
 
+  const reopen = useCallback(async () => {
+    setReopening(true);
+    setError(null);
+    try {
+      const res = await fetch(`${endpoint}/reopen`, { method: "POST" });
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: "" }));
+        throw new Error(error || "Could not reopen.");
+      }
+      await refetch();
+      setSubmitted(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reopen.");
+    } finally {
+      setReopening(false);
+    }
+  }, [endpoint, refetch]);
+
   if (submitted) {
     return (
       <>
@@ -95,6 +116,30 @@ export default function UploadClient({
           Your screenshots for <strong>{projectTitle}</strong> are with the BU Spark! team for
           review. They&rsquo;ll appear on the project page once approved. You can close this tab.
         </p>
+        <p style={{ fontSize: 14, color: "#6a6f74", margin: "18px 0 0" }}>
+          Forgot one? Reopening pulls the submission back so you (or a teammate with this link) can
+          add more, then submit again.
+        </p>
+        <button
+          type="button"
+          onClick={reopen}
+          disabled={reopening}
+          style={{
+            marginTop: 10,
+            padding: "10px 18px",
+            border: `1.5px solid ${ACCENT}`,
+            borderRadius: 7,
+            background: "#fff",
+            color: ACCENT,
+            cursor: reopening ? "wait" : "pointer",
+            fontFamily: "var(--display)",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          {reopening ? "Reopening…" : "Upload more screenshots"}
+        </button>
+        {error && <div style={{ color: "#b3261e", fontSize: 13.5, marginTop: 12 }}>{error}</div>}
       </>
     );
   }
