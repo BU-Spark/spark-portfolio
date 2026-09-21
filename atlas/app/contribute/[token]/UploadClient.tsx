@@ -221,17 +221,17 @@ export default function UploadClient({
         ))}
 
         {images.length < CAP && (
-          // key changes as images grow → the slot remounts fresh after each
-          // upload, clearing its internal preview so the image isn't shown twice
-          // (once here, once in the refetched grid above).
+          // No remount key here: a multi-file drop uploads in sequence inside
+          // this one slot, and remounting it after the first refetch would
+          // orphan the rest of the queue.
           <ImageSlot
-            key={`add-${images.length}`}
             value={null}
             endpoint={endpoint}
+            max={CAP - images.length}
             onChange={(key) => {
               if (key) refetch();
             }}
-            placeholder={images.length ? "Add another" : "Add a screenshot"}
+            placeholder={images.length ? "Add more" : "Add screenshots"}
             aspectRatio="4 / 3"
           />
         )}
