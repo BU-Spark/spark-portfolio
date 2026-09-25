@@ -18,8 +18,14 @@ export function termRank(term: string): number {
 export function projectTerms(p: Project): string[] {
   return uniq(p.runs.map((r) => r.term));
 }
+// A run with no discipline (internships have no course to derive one from)
+// counts as "Misc" — the same fallback the thumbnail badge uses, so the facet
+// count, the filter, and the card can never disagree about the same project.
+export function runDiscipline(r: Run): string {
+  return r.discipline || "Misc";
+}
 export function projectDisciplines(p: Project): string[] {
-  return uniq(p.runs.map((r) => r.discipline));
+  return uniq(p.runs.map(runDiscipline));
 }
 export function projectPrograms(p: Project): string[] {
   return uniq(p.runs.map((r) => r.course)); // program was always === course
@@ -41,7 +47,8 @@ export function primaryRun(p: Project): Run | undefined {
 }
 
 export function primaryDiscipline(p: Project): string {
-  return primaryRun(p)?.discipline || "Misc";
+  const run = primaryRun(p);
+  return run ? runDiscipline(run) : "Misc";
 }
 
 export function latestTerm(p: Project): string {
