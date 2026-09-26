@@ -1,8 +1,8 @@
 // Full-page project detail (replaces the slide-in drawer). Rendered by
 // app/projects/[slug]/page.tsx, which loads the project from the database and
-// passes it in. Server component; the only client-side bit (the masthead logo
-// that hides itself on a missing file) lives in <MastheadLogo>.
-import Link from "next/link";
+// passes it in. Server component; the client-side bits are <MastheadLogo>
+// (hides itself on a missing file) and <GalleryBackLink> (both gallery links
+// restore the visitor's saved filters, search and view).
 import MastheadLogo from "@/components/MastheadLogo";
 import { GalleryBackLink } from "@/lib/shared";
 import ProjectGallery from "@/components/ProjectGallery";
@@ -630,8 +630,7 @@ function Masthead() {
           margin: "0 auto",
         }}
       >
-        <Link
-          href="/"
+        <GalleryBackLink
           style={{
             display: "flex",
             alignItems: "center",
@@ -659,7 +658,7 @@ function Masthead() {
             <span style={{ width: 1, height: 16, background: "#d4d4d4" }} />
             <span style={{ fontSize: 14, color: "#6a6f74" }}>Project Gallery</span>
           </div>
-        </Link>
+        </GalleryBackLink>
       </div>
     </header>
   );
