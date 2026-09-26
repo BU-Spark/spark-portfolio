@@ -71,6 +71,7 @@ async function run(req: Request): Promise<Response> {
     nudge: items.filter((i) => i.kind === "nudge").length,
     inbox: items.filter((i) => i.kind === "inbox").length,
     draft: items.filter((i) => i.kind === "draft").length,
+    suggestion: items.filter((i) => i.kind === "suggestion").length,
   };
   const readyToPublish = items.filter(
     (i) => i.kind === "draft" && i.detail.startsWith("Ready")

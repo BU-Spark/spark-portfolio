@@ -2946,6 +2946,8 @@ export async function listOpenApprovals(scope: {
 /**
  * Standing data-quality counts, keyed by the same labels missingInfo() produces so
  * the digest and the projects-list gap chips can't disagree about what a gap is.
+ * One exception: 'PD link' has no gap chip (admin-only data), so the approvals page
+ * shows it as a plain count rather than a filter link.
  *
  * Deliberately separate from listOpenApprovals: these are conditions, not queued
  * work. Nothing is "waiting" on a missing tech stack — 100% of the catalog has no
@@ -2965,8 +2967,16 @@ export async function backlogCounts(scope: {
          AND coalesce(array_length(array_remove(images, NULL), 1), 0) = 0
      UNION ALL SELECT 'Tech stack', count(*)::int FROM projects
        WHERE ($1 OR owner_org = $2) AND coalesce(array_length(tech, 1), 0) = 0
+     UNION ALL SELECT 'Course', count(*)::int FROM projects
+       WHERE ($1 OR owner_org = $2)
+         AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(runs) r
+                          WHERE coalesce(btrim(r->>'course'), '') <> '')
+     -- The importer writes PD links onto runs[], not projects.pd_url, and the admin
+     -- view reads the run first, so a link on either counts as present.
      UNION ALL SELECT 'PD link', count(*)::int FROM projects
        WHERE ($1 OR owner_org = $2) AND coalesce(btrim(pd_url), '') = ''
+         AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(runs) r
+                          WHERE coalesce(btrim(r->>'pdUrl'), '') <> '')
      UNION ALL SELECT 'Topics', count(*)::int FROM projects
        WHERE ($1 OR owner_org = $2) AND coalesce(array_length(topics, 1), 0) = 0
      UNION ALL SELECT 'Contributors', count(*)::int FROM projects p

@@ -19,7 +19,7 @@ export interface BacklogLine {
 export interface DigestInput {
   orgLabel: string;
   /** Counts of the things waiting on a person, keyed by ApprovalKind. */
-  waiting: { screenshots: number; nudge: number; inbox: number; draft: number };
+  waiting: { screenshots: number; nudge: number; inbox: number; draft: number; suggestion: number };
   /** Drafts that would publish right now — a subset of `waiting.draft`. */
   readyToPublish: number;
   /** Days the oldest waiting item has waited. */
@@ -38,7 +38,7 @@ export interface DigestInput {
  */
 export function hasActionableWork(input: DigestInput): boolean {
   const w = input.waiting;
-  return w.screenshots + w.nudge + w.inbox + w.draft > 0;
+  return w.screenshots + w.nudge + w.inbox + w.draft + w.suggestion > 0;
 }
 
 function delta(line: BacklogLine): string {
@@ -73,6 +73,9 @@ export function buildDigest(input: DigestInput): string {
   }
   if (w.inbox) {
     lines.push(`• ${w.inbox} tracker row${w.inbox === 1 ? "" : "s"} to triage`);
+  }
+  if (w.suggestion) {
+    lines.push(`• ${w.suggestion} community suggestion${w.suggestion === 1 ? "" : "s"} to review`);
   }
   if (w.nudge) {
     lines.push(`• ${w.nudge} upload link${w.nudge === 1 ? "" : "s"} with no response — worth a nudge`);

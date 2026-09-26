@@ -13,6 +13,7 @@ import {
   projectTerms,
   projectCourses,
   missingInfo,
+  GAP_FIELDS,
   missingTeam,
   reviewFlags,
   publishBlockers,
@@ -81,8 +82,6 @@ function statusBadgeStyle(status: ProjectStatus | undefined) {
   const { color } = STATUS_BADGE[status ?? "complete"] ?? STATUS_BADGE.pending;
   return { color, background: `${color}14`, border: `1px solid ${color}44` };
 }
-
-const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Topics", "Contributors"] as const;
 
 // Compact pill label for each missingInfo() field shown next to a row title.
 const MISSING_PILL: Record<string, string> = {
