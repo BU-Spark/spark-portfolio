@@ -19,7 +19,7 @@ const FROM = process.env.EMAIL_FROM || "onboarding@resend.dev";
 // domain is the only thing that has to be verified. That's what makes it useful
 // here: mail leaves from the verified no-reply@buspark.io, but a PM who just hits
 // Reply reaches a real monitored inbox instead of a black hole.
-const REPLY_TO = process.env.EMAIL_REPLY_TO || "buspark@bu.edu";
+export const REPLY_TO = process.env.EMAIL_REPLY_TO || "buspark@bu.edu";
 
 export function emailConfigured(): boolean {
   return !!process.env.RESEND_API_KEY;
@@ -32,10 +32,18 @@ export function emailConfigured(): boolean {
 export async function sendUploadInvite(
   to: string,
   url: string,
-  projectTitle: string
+  projectTitle: string,
+  expiresAt: string
 ): Promise<{ sent: boolean; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { sent: false };
+  // The real date, not "14 days": a re-send reuses the link's original expiry.
+  const expires = new Date(expiresAt).toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/New_York",
+  });
   try {
     const resend = new Resend(apiKey);
     const { error } = await resend.emails.send({
@@ -54,7 +62,7 @@ export async function sendUploadInvite(
           <p style="color:#6a6f74;font-size:13px">Or paste this link into your browser:<br>
              <a href="${url}">${url}</a></p>
           <p style="color:#9a9a9a;font-size:12.5px">This link is for this project only and
-             expires in 14 days. You can forward it to a teammate. No login required.</p>
+             expires on ${expires}. You can forward it to a teammate. No login required.</p>
         </div>`,
     });
     // Resend returns an OBJECT here ({ name, message, statusCode }), and

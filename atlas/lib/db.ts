@@ -2646,6 +2646,10 @@ export async function listUploadRequests(
   if (status) {
     params.push(status);
     clauses.push(`u.status = $${params.length}`);
+    // Nothing ever flips a row to 'expired', so "open" has to mean "open and
+    // still usable" here, the same test getOpenUploadRequest applies. Otherwise
+    // outreach shows, refuses to replace, and emails links that are dead.
+    if (status === "open") clauses.push(`u.expires_at > now()`);
   }
   if (actor && !actor.isSuper) {
     params.push(actor.org);
@@ -2766,7 +2770,10 @@ export async function rejectUploadRequest(
   const rows = await query<{ token: string }>(
     `UPDATE upload_requests u
        SET status = 'open', submitted_at = NULL,
-           reviewed_at = now(), reviewed_by = $2, review_note = $3
+           reviewed_at = now(), reviewed_by = $2, review_note = $3,
+           -- A send-back after expiry would reopen a dead link the PM can't use
+           -- (or even read the note on), so guarantee a week to act on it.
+           expires_at = greatest(u.expires_at, now() + interval '7 days')
      WHERE u.token = $1 AND u.status = 'submitted'
        AND ($5 OR EXISTS (
              SELECT 1 FROM projects p
@@ -2841,7 +2848,9 @@ export async function listOpenApprovals(scope: {
        -- emails anyone, so an unsent link is exactly "not asked yet" — chasing a
        -- PM over one blames them for an email that was never sent, and this feeds
        -- the weekly digest, so it escalates by mail too.
-       SELECT 'nudge', u.token, p.title,
+       -- ref is the project id, not the token: Chase opens the edit page,
+       -- whose upload widget can re-email the open link.
+       SELECT 'nudge', u.project_id, p.title,
               'No upload yet from ' || coalesce(u.last_emailed_to, u.recipient, 'the recipient')
                 || ' — link expires ' || to_char(u.expires_at, 'Mon DD'),
               p.owner_org, u.last_emailed_at

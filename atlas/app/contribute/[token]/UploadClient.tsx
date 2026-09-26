@@ -17,6 +17,7 @@ export default function UploadClient({
   initialImages,
   reviewNote,
   initialSubmitted = false,
+  replyTo,
 }: {
   token: string;
   projectTitle: string;
@@ -24,6 +25,7 @@ export default function UploadClient({
   initialImages: string[];
   reviewNote: string | null;
   initialSubmitted?: boolean;
+  replyTo: string; // passed in: lib/email imports Resend, keep it out of the client bundle
 }) {
   const endpoint = `/api/contribute/${token}`;
   const [images, setImages] = useState<string[]>(initialImages);
@@ -152,6 +154,9 @@ export default function UploadClient({
         </h1>
         <p style={{ fontSize: 15, color: "#6a6f74", lineHeight: 1.55, margin: 0 }}>
           It may have expired or already been submitted. Ask your BU Spark! contact for a new link.
+        </p>
+        <p style={{ fontSize: 14, color: "#6a6f74", lineHeight: 1.55, margin: "14px 0 0" }}>
+          Questions? Email <a href={`mailto:${replyTo}`} style={{ color: ACCENT }}>{replyTo}</a>.
         </p>
       </>
     );

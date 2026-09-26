@@ -37,7 +37,8 @@ const KINDS: Record<
   },
   nudge: {
     label: "Waiting on a PM",
-    href: () => "/admin/uploads?tab=bulk",
+    // ref is the project id. Not the bulk tab: it lists only image-less projects.
+    href: (ref) => `/admin/edit/${encodeURIComponent(ref)}`,
     cta: "Chase",
   },
   inbox: {
@@ -204,7 +205,8 @@ export default function ApprovalsPage() {
             const days = daysSince(it.waitingSince);
             const ready = it.kind === "draft" && it.detail.startsWith("Ready");
             return (
-              <div key={`${it.kind}:${it.ref}`} className="lrow" style={{ cursor: "default" }}>
+              // waitingSince too: two emailed links on one project share a nudge ref.
+              <div key={`${it.kind}:${it.ref}:${it.waitingSince}`} className="lrow" style={{ cursor: "default" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="ttl">
                     {it.title}

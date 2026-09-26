@@ -97,7 +97,7 @@ export async function POST(req: Request) {
         results.push({ id, title: project.title, sent: false, reason: "no PM email on file" });
         continue;
       }
-      const r = await sendUploadInvite(to, `${base}/contribute/${request.token}`, project.title);
+      const r = await sendUploadInvite(to, `${base}/contribute/${request.token}`, project.title, request.expiresAt);
       // Recorded only on success. Minting does not email, so this is the only
       // record that anyone was asked — the approvals nudge and the weekly digest
       // both key off it, and a failed send must not start a 7-day chase clock.
@@ -141,7 +141,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "No open upload link for this project" }, { status: 404 });
   }
 
-  const r = await sendUploadInvite(email, `${base}/contribute/${request.token}`, project.title);
+  const r = await sendUploadInvite(email, `${base}/contribute/${request.token}`, project.title, request.expiresAt);
   if (r.sent) await markUploadRequestEmailed(request.token, email);
   if (!r.sent) {
     // sendUploadInvite never throws, so an unsent mail arrives here as a reason

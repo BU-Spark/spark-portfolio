@@ -4,6 +4,7 @@
 // would hide), but only { title, blurb } is handed to the client — never the
 // admin-only students/teamId. The token in the URL is the capability.
 import { getUploadRequest, getProjectAdmin } from "@/lib/db";
+import { REPLY_TO } from "@/lib/email";
 import UploadClient from "./UploadClient";
 
 export const dynamic = "force-dynamic"; // never cache a per-token page
@@ -75,6 +76,10 @@ function Notice({ title, body }: { title: string; body: string }) {
         {title}
       </h1>
       <p style={{ fontSize: 15, color: "#6a6f74", lineHeight: 1.55, margin: 0 }}>{body}</p>
+      {/* "Ask your contact" is a dead end for someone the link was forwarded to. */}
+      <p style={{ fontSize: 14, color: "#6a6f74", lineHeight: 1.55, margin: "14px 0 0" }}>
+        Questions? Email <a href={`mailto:${REPLY_TO}`} style={{ color: "#0fa392" }}>{REPLY_TO}</a>.
+      </p>
     </>
   );
 }
@@ -146,6 +151,7 @@ export default async function ContributePage({
         initialImages={reqRow.images}
         reviewNote={reqRow.reviewNote}
         initialSubmitted={reqRow.status === "submitted"}
+        replyTo={REPLY_TO}
       />
     </Shell>
   );
