@@ -419,6 +419,13 @@ export async function getAllProjects(): Promise<Project[]> {
   return rows.map((r) => rowToProject(r));
 }
 
+// Every project WITH the admin-only fields (teamId, staff roles). Only for
+// token-gated server-to-server exports — never a page or a public route.
+export async function getAllProjectsAdmin(): Promise<Project[]> {
+  const rows = await query<ProjectRow>(`SELECT ${COLS} FROM projects ORDER BY id`);
+  return rows.map((r) => rowToProject(r, true));
+}
+
 export async function getProjectAdmin(id: string): Promise<Project | null> {
   const rows = await query<ProjectRow>(
     `SELECT ${COLS} FROM projects WHERE id = $1`,
