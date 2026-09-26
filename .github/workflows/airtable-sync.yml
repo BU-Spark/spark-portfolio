@@ -1,0 +1,39 @@
+# Nightly Atlas -> Airtable sync. See scripts/airtable-sync/sync.mjs.
+# Secrets arrive only through env:, never interpolated into the script.
+name: airtable sync
+
+on:
+  schedule:
+    - cron: "15 8 * * *" # 04:15 Boston
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Read both sides and report, write nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: airtable-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/airtable-sync/sync.mjs --self-check
+      - name: Sync
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_BASE_ID: ${{ secrets.AIRTABLE_BASE_ID }}
+          DIGEST_TOKEN: ${{ secrets.DIGEST_TOKEN }}
+          # Scheduled runs have no inputs, so this is empty (a real run) on the cron.
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+        run: node scripts/airtable-sync/sync.mjs
