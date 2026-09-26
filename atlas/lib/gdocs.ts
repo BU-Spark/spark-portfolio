@@ -63,7 +63,39 @@ export function extractPdBlurb(docText: string): string {
   const last = heads[heads.length - 1];
   const body = before.slice((last.index ?? 0) + last[0].length);
 
-  return cleanBlurb(body);
+  return cleanBlurb(trimNonNarrative(body));
+}
+
+// Internal planning sections PMs write INSIDE the description block (no
+// template heading precedes them, so END_RE can't catch them): client notes,
+// phase breakdowns, meeting logistics, advisor recommendations. The blurb is
+// the narrative BEFORE the first line (trimmed, leading bullet ignored) that
+// matches one of these.
+export const BLURB_STOP_PATTERNS: RegExp[] = [
+  /^Client Note\b/i,
+  /^This project (can|will) be divided into/i,
+  /^Phase \d+\s*:/i,
+  /^Stretch\b/i,
+  /^Additional Project Information/i,
+  /^Preferred Client Meeting Time/i,
+  /^Project recommendations/i,
+  /^Things to Avoid/i,
+  /^Common Blockers/i,
+  /^Student Roles/i,
+  /^\(Please confirm with client/i,
+];
+
+// Google Docs comment anchors ("[a]", "[b]", … "[aa]") exported inline.
+const COMMENT_ANCHOR_RE = /\[[a-z]{1,2}\]/g;
+
+/** Cut at the first non-narrative section line and drop comment anchors. */
+function trimNonNarrative(body: string): string {
+  const lines = body.replace(COMMENT_ANCHOR_RE, "").split("\n");
+  const stop = lines.findIndex((l) => {
+    const t = l.replace(/^\s*(?:[*•●○▪◦‣·-]\s+)?/, "");
+    return BLURB_STOP_PATTERNS.some((re) => re.test(t));
+  });
+  return (stop < 0 ? lines : lines.slice(0, stop)).join("\n");
 }
 
 /**
@@ -79,7 +111,7 @@ export function recleanBlurb(stored: string): string {
   const text = stored.replace(/\r\n/g, "\n");
   const end = text.match(END_RE);
   const endIdx = end && end.index !== undefined ? end.index : text.length;
-  return cleanBlurb(text.slice(0, endIdx));
+  return cleanBlurb(trimNonNarrative(text.slice(0, endIdx)));
 }
 
 // Label that opens the PD's tech-stack field (in the "Project Details" table or
