@@ -34,6 +34,17 @@ export async function PUT(req: Request) {
         )
       : [];
 
+  // An explicitly emptied vocabulary can't be stored: getGallerySettings reads an
+  // empty list back as the built-in defaults. Refuse it rather than report
+  // "saved" and have the removed values reappear.
+  const lists = { disciplines: "Disciplines", clientTypes: "Client types", programs: "Programs", topics: "Topics" } as const;
+  for (const [k, label] of Object.entries(lists)) {
+    const v = body[k as keyof typeof lists];
+    if (v !== undefined && clean(v).length === 0) {
+      return Response.json({ error: `${label} can't be empty; keep at least one value` }, { status: 400 });
+    }
+  }
+
   const current = await getGallerySettings();
   const next: GallerySettings = {
     disciplines: clean(body.disciplines).length

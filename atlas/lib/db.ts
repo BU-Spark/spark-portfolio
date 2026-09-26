@@ -1518,10 +1518,16 @@ export async function restoreInboxRow(id: number, actor: Actor): Promise<boolean
   return rows.length > 0;
 }
 
-export async function listAliases(): Promise<{ nameKey: string; projectId: string; createdAt: string }[]> {
+// Same owner_org scope as removeAlias below, so the panel lists only aliases the
+// actor can actually remove.
+export async function listAliases(actor: Actor): Promise<{ nameKey: string; projectId: string; createdAt: string }[]> {
   await ensureIngestTables();
   const rows = await query<{ name_key: string; project_id: string; created_at: string }>(
-    `SELECT name_key, project_id, created_at FROM project_aliases ORDER BY created_at DESC`
+    `SELECT a.name_key, a.project_id, a.created_at
+       FROM project_aliases a JOIN projects p ON p.id = a.project_id
+      WHERE ($2 OR p.owner_org = $1)
+      ORDER BY a.created_at DESC`,
+    [actor.org, actor.isSuper]
   );
   return rows.map((r) => ({ nameKey: r.name_key, projectId: r.project_id, createdAt: r.created_at }));
 }

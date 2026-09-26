@@ -29,7 +29,7 @@ export async function GET(req: Request) {
     statusParam === "dismissed" ? "dismissed" : statusParam === "all" ? "all" : "pending";
   // Scoped to the actor's org (supers see everything): rows carry the producing
   // team's role names, which are admin-only PII.
-  const [rows, aliases] = await Promise.all([listInbox(status, g.actor), listAliases()]);
+  const [rows, aliases] = await Promise.all([listInbox(status, g.actor), listAliases(g.actor)]);
   return Response.json({ rows, count: rows.length, aliases });
 }
 

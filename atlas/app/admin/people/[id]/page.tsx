@@ -9,6 +9,8 @@ import { useParams, useRouter } from "next/navigation";
 import SparkFlow from "@/components/admin/SparkFlow";
 import PageHeader from "@/components/admin/PageHeader";
 import { useToast } from "@/components/admin/useToast";
+import { useUnsavedGuard } from "@/components/admin/useUnsavedGuard";
+import { useActor } from "@/components/admin/ActorContext";
 import { activeAt, color, type RoleStint, type DetailMap } from "@/components/admin/sparkFlowMath";
 
 interface Profile {
@@ -26,6 +28,7 @@ export default function PersonProfilePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { toastEl, notify } = useToast();
+  const actor = useActor();
   const [p, setP] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -65,6 +68,14 @@ export default function PersonProfilePage() {
 
   const active = p ? activeAt(p.roles, now) : [];
 
+  const resetFields = (cur: Profile) => {
+    setEmail(cur.email ?? "");
+    setAliases(cur.aliases.join(", "));
+    setNotes(cur.notes ?? "");
+  };
+  const dirty = editing && !!p && (email !== (p.email ?? "") || aliases !== p.aliases.join(", ") || notes !== (p.notes ?? ""));
+  useUnsavedGuard(dirty);
+
   const save = async () => {
     setSaving(true);
     try {
@@ -98,11 +109,15 @@ export default function PersonProfilePage() {
   };
 
   const doDelete = async () => {
-    if (!confirm(`Delete "${p?.name}" from the directory? This removes the person record (project role data is unaffected).`)) return;
+    if (!confirm(`Permanently delete "${p?.name}"? This also removes their roles on every project and team, and cannot be undone. To fold a duplicate into another person instead, use Merge.`)) return;
     const res = await fetch("/api/people", {
       method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: Number(id) }),
     });
-    if (!res.ok) { notify("err", "Delete failed."); return; }
+    if (!res.ok) {
+      const d = await res.json().catch(() => null);
+      notify("err", `Delete failed${d?.error ? `: ${d.error}` : "."}`);
+      return;
+    }
     router.push("/admin/people");
   };
 
@@ -145,7 +160,7 @@ export default function PersonProfilePage() {
                   )}
                 </div>
                 <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", gap: 9, alignItems: "flex-end" }}>
-                  <button className="btn btn-teal" onClick={() => setEditing((e) => !e)}>{editing ? "Done editing" : "Edit person"}</button>
+                  <button className="btn btn-teal" onClick={() => { if (editing) resetFields(p); setEditing(!editing); }}>{editing ? "Cancel" : "Edit person"}</button>
                   {p.email && <a className="tlink" href={`mailto:${p.email}`}>✉ {p.email}</a>}
                 </div>
               </div>
@@ -244,7 +259,10 @@ export default function PersonProfilePage() {
                       <button className="btn-sm" onClick={doMerge} disabled={!mergeTarget}>Merge</button>
                     </div>
                     <p className="hint">Name variants become aliases of the survivor; this record is removed.</p>
-                    <button className="btn-sm" onClick={doDelete} style={{ marginTop: 12, color: "var(--rose)", borderColor: "var(--rose-line)" }}>Delete person</button>
+                    {/* DELETE /api/people is super-only (it cascades every project role). */}
+                    {actor?.isSuper && (
+                      <button className="btn-sm" onClick={doDelete} style={{ marginTop: 12, color: "var(--rose)", borderColor: "var(--rose-line)" }}>Delete person</button>
+                    )}
                   </div>
                 )}
               </div>

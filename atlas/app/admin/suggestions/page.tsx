@@ -72,6 +72,9 @@ function SuggestionsInner() {
   }, [load]);
 
   async function review(id: number, verdict: "accepted" | "rejected") {
+    // Only pending rows are listed and the API refuses to re-review a closed one,
+    // so a rejection can't be undone from the UI.
+    if (verdict === "rejected" && !window.confirm("Reject this suggestion? It can't be reopened afterwards.")) return;
     setBusy(id);
     const res = await fetch("/api/suggestions", {
       method: "POST",
