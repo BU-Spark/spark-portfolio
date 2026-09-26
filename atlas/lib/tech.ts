@@ -80,6 +80,76 @@ const PROSE_WORDS =
 
 const BULLET_RE = /^[\s]*[*•●○▪◦‣·\-–—]\s+/;
 
+// ---- PD noise filters -------------------------------------------------------
+// The PD's tech cell is often followed (in the doc's plain text) by the contact
+// table and meeting notes, and the unfilled template leaves instructions behind.
+// None of that is tech, and the contact table carries student/client emails, so
+// it must not reach tech[] OR the admin tech note.
+
+// PD section headings that sit inside/near the tech block but are not tech.
+export const PD_SECTION_HEADINGS = [
+  "Questions", "Background Context", "Background Information", "Readings",
+  "Frontend", "Backend", "API", "Authentication & Authorization", "Database",
+  "Storage", "Deployment & Infrastructure", "Fonts", "User Personas",
+  "Core Application",
+];
+const HEADING_SET = new Set(PD_SECTION_HEADINGS.map((h) => h.toLowerCase()));
+
+// Contact-table column labels and role labels (one cell per line in the export).
+const ROLE_RE =
+  /^(?:role|first name|last name|name|email|eir|pm|tpm|program lead|post-?bacc(?:alaureate)? fellow|spark advisor|senior advisor|tech(?:nical)? advisor|client|teammate(?:\s*[–—-]\s*\w+)?)$/i;
+const JUNK_TAG_RE = /^(?:tbd|n\/?a|data|questions|see figma)$|^_+$/i;
+
+// A line that opens meeting notes / a new doc tab: everything after is dropped.
+const MEETING_RE = /^(?:client meeting|meeting\s*\d+|tab\s*\d+|quick recap)\b/i;
+const CONTACT_HEAD_RE = /^(?:first name|last name|email)$/i;
+// Unfilled template instructions, left behind when nobody filled the cell.
+const TEMPLATE_LINE_RE =
+  /^(?:list of tools|if a client works with|include links to recommended|\/?\s*design system(?: used)?$)/i;
+const ANCHOR_RE = /\[[a-z]{1,2}\]/g; // Google Docs comment anchors: "[b]", "[ab]"
+
+const bare = (l: string) => l.replace(BULLET_RE, "").replace(/[:\s]+$/, "").trim();
+
+/**
+ * Clean the raw PD tech cell: cut at the contact table ("Role" then
+ * "First Name"/"Last Name"/"Email") or meeting notes / tab markers, drop
+ * Google Docs comment anchors, unfilled template instructions and
+ * underscore-only rules. The result is what we store as the admin tech note
+ * and what tags are derived from.
+ */
+export function cleanTechNote(text: string): string {
+  const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
+  let end = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const b = bare(lines[i]);
+    if (MEETING_RE.test(b) || /^role\s*[\t|]\s*(?:first name|last name|email)\b/i.test(b)) {
+      end = i;
+      break;
+    }
+    if (/^role$/i.test(b)) {
+      const next = lines.slice(i + 1).map(bare).find(Boolean) || "";
+      if (CONTACT_HEAD_RE.test(next)) {
+        end = i;
+        break;
+      }
+    }
+  }
+  return lines
+    .slice(0, end)
+    .map((l) => l.replace(ANCHOR_RE, "").replace(/\s+$/, ""))
+    .filter((l) => {
+      const b = bare(l);
+      return b && !/^_+$/.test(b) && !TEMPLATE_LINE_RE.test(b);
+    })
+    .join("\n")
+    .trim();
+}
+
+function isJunkTag(t: string): boolean {
+  const k = t.toLowerCase();
+  return HEADING_SET.has(k) || ROLE_RE.test(t) || JUNK_TAG_RE.test(t);
+}
+
 function dedupe(tags: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -113,6 +183,8 @@ function isLiteralTag(item: string): boolean {
 function cleanTag(item: string): string {
   return item
     .replace(/\([^)]*\)/g, " ")
+    .replace(/[()]/g, " ") // stray half-parens: "Python )"
+    .replace(/\s+if\s+(?:needed|necessary|possible|required|applicable)\s*$/i, "")
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/[.,;:]+$/, "")
     .replace(/\s+/g, " ")
@@ -137,12 +209,13 @@ export interface TechParse {
  * an admin-only note and never lose the original nuance.
  */
 export function parseTechStack(cellText: string): TechParse {
-  const raw = (cellText || "").replace(/\r\n/g, "\n").trim();
+  const raw = cleanTechNote(cellText);
   if (!raw) return { tags: [], raw: "", mode: "empty" };
 
   const lines = raw
     .split("\n")
-    .map((l) => l.replace(BULLET_RE, "").trim())
+    // Drop a template example ("… e.g. Tableau, PowerBI") so it can't become tags.
+    .map((l) => l.replace(BULLET_RE, "").replace(/\(?\be\.g\..*$/i, "").trim())
     .filter(Boolean);
 
   const literal: string[] = [];
@@ -165,15 +238,16 @@ export function parseTechStack(cellText: string): TechParse {
       // still count toward prose extraction.
       const stripped = item.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
       if (stripped && isLiteralTag(stripped)) {
-        const t = cleanTag(item);
-        if (t) literal.push(t);
+        // cleanTag can surface a comma once a note is stripped:
+        // "Python, Jupyter Notebooks (for EDA)" → two tags.
+        for (const t of cleanTag(item).split(/\s*,\s*/)) if (t) literal.push(t);
       } else {
         fromProse.push(...matchDictionary(item));
       }
     }
   }
 
-  const tags = dedupe([...literal, ...fromProse]);
-  const mode: TechParse["mode"] = literal.length ? "list" : "prose";
+  const tags = dedupe([...literal, ...fromProse]).filter((t) => !isJunkTag(t));
+  const mode: TechParse["mode"] = literal.some((t) => !isJunkTag(t)) ? "list" : "prose";
   return { tags, raw, mode };
 }
