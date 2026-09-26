@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseTechStack } from "./tech";
+import { parseTechStack, cleanTechNote, PD_SECTION_HEADINGS } from "./tech";
+import { extractTechStack } from "./gdocs";
 
 describe("parseTechStack", () => {
   it("clean bullet list → one tag per item (PD Image #5)", () => {
@@ -64,5 +65,70 @@ describe("parseTechStack", () => {
     );
     expect(r.tags).toContain("ArcGIS");
     expect(r.tags).toContain("Python");
+  });
+});
+
+describe("PD noise (contact table, headings, template)", () => {
+  const contact = [
+    "Role", "First Name", "Last Name", "Email",
+    "EIR", "Jane", "Doe", "jane@bu.edu",
+    "Teammate – DS", "Sam", "Lee", "sam@bu.edu",
+    "Program Lead", "Alex", "Kim", "alex@client.org",
+    "________________",
+    "Tab 2",
+    "Client Meeting Template Date: Attendance:",
+  ].join("\n");
+
+  it("contact table after real tech yields only the real tech, and the note stops before it", () => {
+    const r = parseTechStack(`• Python\n• React\n${contact}`);
+    expect(r.tags).toEqual(["Python", "React"]);
+    expect(r.raw).toBe("• Python\n• React");
+    expect(r.raw).not.toMatch(/@|Role|Meeting/);
+  });
+
+  it("stops the tech note at meeting notes even without a contact table", () => {
+    expect(cleanTechNote("Python\nMeeting 6: talked to client\nJane")).toBe("Python");
+    expect(cleanTechNote("Python\nQuick recap\nstuff")).toBe("Python");
+  });
+
+  it("through extractTechStack: doc with contact table after the tech cell", () => {
+    const doc = `Preferred Tech Stack\nArcGIS, Python\n${contact}`;
+    const r = parseTechStack(extractTechStack(doc));
+    expect(r.tags).toEqual(["ArcGIS", "Python"]);
+    expect(r.raw).not.toMatch(/jane@bu\.edu/);
+  });
+
+  it("unfilled template example 'e.g. Tableau, PowerBI' yields nothing", () => {
+    const r = parseTechStack(
+      "List of tools/ tech stack preferred by client e.g. Tableau, PowerBI, Flourish, etc."
+    );
+    expect(r.tags).toEqual([]);
+    expect(r.raw).toBe("");
+    expect(parseTechStack("e.g. Tableau, PowerBI").tags).toEqual([]);
+  });
+
+  it("drops template instructions and comment anchors from the note", () => {
+    const r = parseTechStack(
+      "If a client works with a specific tech stack or programs, please list here\n/ Design System[b]\n[b]\nFigma[a]\nInclude links to recommended libraries"
+    );
+    expect(r.raw).toBe("Figma");
+    expect(r.tags).toEqual(["Figma"]);
+  });
+
+  it("'Python, Jupyter Notebooks' splits into two tags", () => {
+    expect(parseTechStack("Python, Jupyter Notebooks").tags).toEqual(["Python", "Jupyter Notebooks"]);
+    expect(parseTechStack("• Python, Jupyter Notebooks (for EDA)").tags).toEqual([
+      "Python",
+      "Jupyter Notebooks",
+    ]);
+  });
+
+  it("rejects section headings and bare junk", () => {
+    const r = parseTechStack([...PD_SECTION_HEADINGS, "TBD", "Data", "See Figma", "PM", "React"].join("\n"));
+    expect(r.tags).toEqual(["React"]);
+  });
+
+  it("strips trailing qualifiers and stray punctuation", () => {
+    expect(parseTechStack("• SQL if needed\n• Python )").tags).toEqual(["SQL", "Python"]);
   });
 });
