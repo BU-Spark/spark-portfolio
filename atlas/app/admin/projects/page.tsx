@@ -133,6 +133,7 @@ export default function ManageProjectsPage() {
   // Single-row destructive confirm targets.
   const [removeTarget, setRemoveTarget] = useState<Project | null>(null);
   const [hideTarget, setHideTarget] = useState<Project | null>(null);
+  const [publishTarget, setPublishTarget] = useState<Project | null>(null);
   // Bulk destructive confirms.
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   // Which row's overflow (⋯) menu is open, if any.
@@ -362,13 +363,14 @@ export default function ManageProjectsPage() {
 
   // Keyed on visibility, not the legacy `published` boolean: that is true for
   // Ready (internal/restricted) too, so it made "Hide" publish a Ready project.
-  // "Add" respects the publish gate (surfaces a 422); "Hide" confirms first.
+  // A draft is marked Ready (same as the Diagnose button and bulk action), never
+  // sent straight to public. Ready -> public and public -> Ready both confirm first;
+  // "Add" still respects the publish gate (surfaces a 422).
   const onToggleClick = (p: Project) => {
-    if (p.visibility === "public") {
-      setHideTarget(p);
-    } else {
-      toggleGallery(p, "public");
-    }
+    const vis = p.visibility ?? "hidden";
+    if (vis === "public") setHideTarget(p);
+    else if (vis === "hidden") toggleGallery(p, "internal");
+    else setPublishTarget(p);
   };
 
   const toggleFeatured = async (p: Project) => {
@@ -513,6 +515,13 @@ export default function ManageProjectsPage() {
     setHideTarget(null);
     if (!p) return;
     await toggleGallery(p, "internal");
+  };
+
+  const publishConfirmed = async () => {
+    const p = publishTarget;
+    setPublishTarget(null);
+    if (!p) return;
+    await toggleGallery(p, "public");
   };
 
   // Close the overflow menu on any outside click / Escape.
@@ -1361,6 +1370,11 @@ export default function ManageProjectsPage() {
               const review = reviewFlags(p);
               const isDraft = p.published === false;
               const onGallery = p.visibility === "public";
+              const toggleLabel = onGallery
+                ? "Hide from gallery"
+                : (p.visibility ?? "hidden") === "hidden"
+                  ? "Mark ready"
+                  : "Add to public gallery";
               const blockers = isDraft ? publishBlockers(p) : [];
               const dotColor = !isDraft
                 ? "transparent"
@@ -1563,8 +1577,8 @@ export default function ManageProjectsPage() {
                       className="rec-tool"
                       onClick={() => onToggleClick(p)}
                       disabled={rowBusy}
-                      title={onGallery ? "Hide from gallery" : "Add to public gallery"}
-                      aria-label={onGallery ? "Hide from gallery" : "Add to public gallery"}
+                      title={toggleLabel}
+                      aria-label={toggleLabel}
                     >
                       {!onGallery ? (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
@@ -1627,7 +1641,7 @@ export default function ManageProjectsPage() {
                                 <path d="M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2" />
                               </svg>
                             )}
-                            {onGallery ? "Hide from gallery" : "Add to public gallery"}
+                            {toggleLabel}
                           </button>
                           <div className="mi-sep" />
                           <button
@@ -1716,6 +1730,23 @@ export default function ManageProjectsPage() {
         confirmLabel="Hide"
         onConfirm={hideConfirmed}
         onCancel={() => setHideTarget(null)}
+      />
+
+      {/* Confirm putting a Ready project on the public gallery */}
+      <ConfirmModal
+        open={!!publishTarget}
+        title="Add to public gallery?"
+        body={
+          <>
+            <strong>{publishTarget?.title}</strong>
+            {publishTarget?.visibility === "restricted"
+              ? " is restricted — deliberately closed, even to BU users. Adding it makes it visible to anyone on the public gallery."
+              : " will become visible to anyone on the public gallery."}
+          </>
+        }
+        confirmLabel="Add to gallery"
+        onConfirm={publishConfirmed}
+        onCancel={() => setPublishTarget(null)}
       />
 
       {/* Confirm bulk delete */}
