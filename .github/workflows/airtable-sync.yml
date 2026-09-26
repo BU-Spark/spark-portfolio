@@ -11,6 +11,10 @@ on:
         description: "Read both sides and report, write nothing"
         type: boolean
         default: true
+      prune:
+        description: "Delete Projects rows whose Atlas ID is blank or not in Atlas (manual only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -36,4 +40,6 @@ jobs:
           DIGEST_TOKEN: ${{ secrets.DIGEST_TOKEN }}
           # Scheduled runs have no inputs, so this is empty (a real run) on the cron.
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
+          # Never set on the schedule: only a person ticking the box prunes.
+          PRUNE: ${{ inputs.prune && '1' || '' }}
         run: node scripts/airtable-sync/sync.mjs

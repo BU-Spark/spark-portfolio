@@ -57,7 +57,14 @@ export function resolveFields(tableFields) {
   return { names, missing };
 }
 
+export function prunable(records, atlasIds) {
+  return records.filter((r) => !r.atlasId || !atlasIds.has(r.atlasId));
+}
+
 function selfCheck() {
+  assert.deepEqual(
+    prunable([{ recId: "1", atlasId: "a" }, { recId: "2", atlasId: "" }, { recId: "3", atlasId: "zzz" }], new Set(["a"])).map((r) => r.recId),
+    ["2", "3"], "keeps Atlas rows, prunes blank and unknown ids");
   assert.equal(currentTerm(new Date("2026-09-26")), "Fall 2026");
   assert.equal(currentTerm(new Date("2026-06-01")), "Summer 2026");
   assert.equal(currentTerm(new Date("2026-02-01")), "Spring 2026");
@@ -117,6 +124,7 @@ async function main() {
   console.log(`Airtable: Projects table found, all ${Object.keys(FIELDS).length} fields resolved`);
 
   const existing = new Map();
+  const allRecords = []; // { recId, atlasId } for every row, including ones with no Atlas ID
   let offset;
   do {
     const q = new URLSearchParams();
@@ -125,6 +133,7 @@ async function main() {
     const page = await airtable(`/v0/${base}/${table.id}?${q}`);
     for (const r of page.records) {
       const id = r.fields[names.id];
+      allRecords.push({ recId: r.id, atlasId: id || "" });
       if (id) existing.set(id, { status: r.fields[names.status] || "" });
     }
     offset = page.offset;
@@ -135,7 +144,21 @@ async function main() {
   const records = buildRecords(projects, existing, names, term);
   const creates = projects.filter((p) => !existing.has(p.id)).length;
   console.log(`plan: ${creates} to create, ${projects.length - creates} to update, current term ${term}`);
+  // PRUNE (manual runs only): delete Projects rows Atlas does not know, e.g. the
+  // sample rows Airtable's AI builder seeds. Never on the schedule, so rows
+  // staff add by hand are only removed when someone asks for it.
+  const toPrune = prunable(allRecords, new Set(projects.map((p) => p.id)));
+  if (process.env.PRUNE) console.log(`prune: ${toPrune.length} rows not in Atlas`);
   if (dry) { console.log("DRY_RUN: nothing written"); return; }
+  if (process.env.PRUNE) {
+    for (let i = 0; i < toPrune.length; i += 10) {
+      const q = new URLSearchParams();
+      for (const r of toPrune.slice(i, i + 10)) q.append("records[]", r.recId);
+      await airtable(`/v0/${base}/${table.id}?${q}`, { method: "DELETE" });
+      await sleep(220);
+    }
+    console.log(`pruned ${toPrune.length} rows`);
+  }
 
   for (let i = 0; i < records.length; i += 10) {
     await airtable(`/v0/${base}/${table.id}`, {
