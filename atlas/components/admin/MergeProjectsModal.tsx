@@ -5,6 +5,7 @@
 // per-semester — runs/roles/PD, contributors, role timeline — combines automatically.
 import { useMemo, useState } from "react";
 import type { Project } from "@/lib/types";
+import { VISIBILITIES, VISIBILITY_SHORT, type Visibility } from "@/lib/data";
 
 const ACCENT = "#0fa392";
 
@@ -25,6 +26,14 @@ const TEXT_FIELDS: [TextField, string][] = [
 ];
 
 const txt = (v: string | null | undefined) => (v && v.trim() ? v.trim() : "");
+// Compare visibility, never the legacy `published` boolean: it is true for
+// restricted, internal AND public, so it cannot see "this one is on the gallery".
+const vis = (p: Project): Visibility =>
+  (VISIBILITIES as readonly string[]).includes(p.visibility ?? "")
+    ? (p.visibility as Visibility)
+    : p.published ? "internal" : "hidden";
+// VISIBILITIES is ordered least → most visible.
+const visRank = (p: Project) => VISIBILITIES.indexOf(vis(p));
 const sameTermCourse = (r: { term: string; course: string }) =>
   `${(r.term || "").trim().toLowerCase()}|${(r.course || "").trim().toLowerCase()}`;
 
@@ -39,9 +48,9 @@ export default function MergeProjectsModal({
   onClose: () => void;
   onMerged: (survivorId: string) => void;
 }) {
-  // Default survivor: the published one, else the one with more semesters, else A.
+  // Default survivor: the more visible one, else the one with more semesters, else A.
   const initialSurvivor: Side = useMemo(() => {
-    if (!!a.published !== !!b.published) return a.published ? "A" : "B";
+    if (visRank(a) !== visRank(b)) return visRank(a) > visRank(b) ? "A" : "B";
     if ((a.runs?.length ?? 0) !== (b.runs?.length ?? 0))
       return (a.runs?.length ?? 0) >= (b.runs?.length ?? 0) ? "A" : "B";
     return "A";
@@ -49,7 +58,7 @@ export default function MergeProjectsModal({
 
   const [survivor, setSurvivor] = useState<Side>(initialSurvivor);
   // Per-field overrides; absent → defaults to survivor's side (or the populated side).
-  const [overrides, setOverrides] = useState<Partial<Record<TextField | "published" | "featured", Side>>>({});
+  const [overrides, setOverrides] = useState<Partial<Record<TextField | "visibility" | "featured", Side>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -60,7 +69,7 @@ export default function MergeProjectsModal({
   // it has a value, else the other (populated) side.
   const pickText = (f: TextField): Side =>
     overrides[f] ?? (txt(proj(survivor)[f] as string | null) ? survivor : txt(proj(other)[f] as string | null) ? other : survivor);
-  const pickBool = (f: "published" | "featured"): Side => overrides[f] ?? survivor;
+  const pickSide = (f: "visibility" | "featured"): Side => overrides[f] ?? survivor;
 
   // A text field needs a picker only when BOTH sides are populated and differ.
   const textConflicts = TEXT_FIELDS.filter(([f]) => {
@@ -68,7 +77,9 @@ export default function MergeProjectsModal({
     const vb = txt(b[f] as string | null);
     return va && vb && va !== vb;
   });
-  const boolConflicts = (["published", "featured"] as const).filter((f) => !!a[f] !== !!b[f]);
+  const boolConflicts = (["visibility", "featured"] as const).filter((f) =>
+    f === "visibility" ? vis(a) !== vis(b) : !!a[f] !== !!b[f]
+  );
 
   // Auto-combine preview.
   const semesters = useMemo(() => {
@@ -109,8 +120,8 @@ export default function MergeProjectsModal({
       prodUrl: valText("prodUrl"),
       driveUrl: valText("driveUrl"),
       techNote: valText("techNote"),
-      published: !!proj(pickBool("published")).published,
-      featured: !!proj(pickBool("featured")).featured,
+      visibility: vis(proj(pickSide("visibility"))),
+      featured: !!proj(pickSide("featured")).featured,
     };
     try {
       const res = await fetch("/api/projects/merge", {
@@ -159,7 +170,7 @@ export default function MergeProjectsModal({
           </span>
         </div>
         <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--faint)", paddingLeft: 22 }}>
-          {p.id} · {(p.runs?.length ?? 0)} sem · {p.published ? "published" : "draft"}
+          {p.id} · {(p.runs?.length ?? 0)} sem · {VISIBILITY_SHORT[vis(p)]}
         </div>
       </button>
     );
@@ -231,11 +242,11 @@ export default function MergeProjectsModal({
               {boolConflicts.map((f) => (
                 <div key={f}>
                   <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--sec)", marginBottom: 5 }}>
-                    {f === "published" ? "Published" : "Featured"}
+                    {f === "visibility" ? "Visibility" : "Featured"}
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {(["A", "B"] as Side[]).map((side) => {
-                      const on = pickBool(f) === side;
+                      const on = pickSide(f) === side;
                       return (
                         <button
                           key={side}
@@ -248,7 +259,8 @@ export default function MergeProjectsModal({
                             fontSize: 12.5, color: "var(--ink)",
                           }}
                         >
-                          {proj(side).title?.slice(0, 18) || side}: {proj(side)[f] ? "yes" : "no"}
+                          {proj(side).title?.slice(0, 18) || side}:{" "}
+                          {f === "visibility" ? VISIBILITY_SHORT[vis(proj(side))] : proj(side)[f] ? "yes" : "no"}
                         </button>
                       );
                     })}

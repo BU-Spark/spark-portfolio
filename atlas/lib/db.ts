@@ -785,6 +785,9 @@ export interface MergeResolution {
   techNote?: string | null;
   featured?: boolean;
   published?: boolean;
+  // Which side's visibility to keep. Only honoured when it is one of the two
+  // rows' current values, so a merge can never invent a state neither side had.
+  visibility?: Visibility;
 }
 
 // Combine two runs that name the same (term, course): union students + class
@@ -926,12 +929,18 @@ export async function mergeProjects(
     const driveUrl = resolution.driveUrl !== undefined ? resolution.driveUrl : (nz(survivor.drive_url) ?? nz(absorbed.drive_url));
     const techNote = resolution.techNote !== undefined ? resolution.techNote : (nz(survivor.tech_note) ?? nz(absorbed.tech_note));
     const featured = resolution.featured !== undefined ? resolution.featured : survivor.featured;
-    const published = resolution.published !== undefined ? resolution.published : survivor.published;
-    // Keep visibility in step with the boolean the merge modal resolved. Same
+    const publishedIn = resolution.published !== undefined ? resolution.published : survivor.published;
+    // Visibility: the side the modal picked, else the legacy boolean path. Same
     // non-demoting rule as updateProject: a merge must not silently pull a live
     // project off the gallery, and it must never promote one onto it.
     const survivorVis = survivor.visibility ?? (survivor.published ? "internal" : "hidden");
-    const visibility = mergedVisibility(survivorVis as Visibility, published);
+    const absorbedVis = absorbed.visibility ?? (absorbed.published ? "internal" : "hidden");
+    const visibility =
+      resolution.visibility && [survivorVis, absorbedVis].includes(resolution.visibility)
+        ? resolution.visibility
+        : mergedVisibility(survivorVis as Visibility, publishedIn);
+    // Legacy boolean is derived, never resolved separately, so the two can't drift.
+    const published = visibility !== "hidden";
     const contact = nz(survivor.contact) ?? nz(absorbed.contact);
 
     // Per-semester data combines automatically.
