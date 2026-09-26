@@ -74,23 +74,34 @@ export default function PersonProfilePage() {
     setNotes(cur.notes ?? "");
   };
   const dirty = editing && !!p && (email !== (p.email ?? "") || aliases !== p.aliases.join(", ") || notes !== (p.notes ?? ""));
-  useUnsavedGuard(dirty);
+  const { guardedPush } = useUnsavedGuard(dirty);
+  // Client-side <Link> navigation never fires beforeunload; confirm it here.
+  const guardLink = (href: string) => (e: React.MouseEvent) => {
+    if (!dirty || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    guardedPush(href);
+  };
 
   const save = async () => {
+    if (!p) return;
+    const fields = {
+      email: email.trim() || null, notes: notes.trim() || null,
+      aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean),
+    };
     setSaving(true);
     try {
       const res = await fetch("/api/people", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: Number(id), email: email.trim() || null, notes: notes.trim() || null,
-          aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean),
-        }),
+        body: JSON.stringify({ id: Number(id), ...fields }),
       });
       if (!res.ok) { notify("err", "Couldn't save."); return; }
       notify("ok", "Saved.");
       setEditing(false);
-      setP((cur) => cur ? { ...cur, email: email.trim() || null, notes: notes.trim() || null, aliases: aliases.split(",").map((a) => a.trim()).filter(Boolean) } : cur);
+      // Reset the inputs to the normalized values too, or the next edit starts dirty.
+      const next = { ...p, ...fields };
+      setP(next);
+      resetFields(next);
     } catch { notify("err", "Couldn't save."); }
     finally { setSaving(false); }
   };
@@ -126,7 +137,7 @@ export default function PersonProfilePage() {
       {toastEl}
       <PageHeader eyebrow="People / Profile" title={p?.name ?? (notFound ? "Not found" : "…")} />
       <div className="content">
-        <Link href="/admin/people" style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-3)", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
+        <Link href="/admin/people" onClick={guardLink("/admin/people")} style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-3)", display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 16 }}>
           ← All people
         </Link>
 
@@ -207,7 +218,7 @@ export default function PersonProfilePage() {
                   {p.projects.length === 0 ? (
                     <div style={{ color: "var(--ink-4)", fontSize: 13.5, padding: "10px 0" }}>No project roles recorded.</div>
                   ) : p.projects.map((proj) => (
-                    <Link key={proj.id} href={`/admin/edit/${proj.id}`} style={{ display: "flex", gap: 13, alignItems: "center", padding: "13px 0", borderTop: "1px solid var(--line-2)" }}>
+                    <Link key={proj.id} href={`/admin/edit/${proj.id}`} onClick={guardLink(`/admin/edit/${proj.id}`)} style={{ display: "flex", gap: 13, alignItems: "center", padding: "13px 0", borderTop: "1px solid var(--line-2)" }}>
                       <div style={{ width: 52, height: 40, borderRadius: 8, flexShrink: 0, background: "repeating-linear-gradient(125deg,#e7ece9 0 10px,#f2f5f2 10px 20px)" }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontFamily: "var(--display)", fontWeight: 600, fontSize: 14.5 }}>{proj.title}</div>

@@ -39,7 +39,8 @@ export default function ImportInboxPage() {
   const [aliases, setAliases] = useState<AliasEntry[]>([]);
   const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadErr, setLoadErr] = useState(false);
+  // Per-list load errors: a failed tab must not blank the other tab's rows.
+  const [loadErr, setLoadErr] = useState({ pending: false, dismissed: false });
   // Global busy guard: any single-row mutation in flight disables every row's actions.
   const [busy, setBusy] = useState<string | null>(null);
   const [busyAlias, setBusyAlias] = useState<string | null>(null);
@@ -81,12 +82,17 @@ export default function ImportInboxPage() {
         fetch("/api/projects"),
       ]);
     } catch {
-      setLoadErr(true);
+      setLoadErr({ pending: true, dismissed: true });
+      setSelectedIds(new Set());
       setLoading(false);
       return;
     }
     // A failed load must not fall through to the "Inbox empty" celebration.
-    setLoadErr(!rPending.ok || !rDismissed.ok || !rp.ok);
+    setLoadErr({ pending: !rPending.ok, dismissed: !rDismissed.ok });
+    // Selection over rows that are no longer on screen must not drive a bulk action.
+    if (!rPending.ok || !rDismissed.ok) setSelectedIds(new Set());
+    // Projects only feed the merge-target picker; don't hide the list over it.
+    if (!rp.ok) notify("err", "Couldn't load projects for merge.");
     if (rPending.ok) {
       const d = await rPending.json();
       setRows(d.rows ?? []);
@@ -105,7 +111,7 @@ export default function ImportInboxPage() {
       );
     }
     setLoading(false);
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     refresh();
@@ -140,6 +146,7 @@ export default function ImportInboxPage() {
   const pendingCount = rows.length;
   const dismissedCount = dismissedRows.length;
   const baseRows = viewTab === "pending" ? rows : dismissedRows;
+  const listErr = loadErr[viewTab];
   const activeRows = useMemo(
     () => baseRows.filter(matchesQuery),
     [baseRows, matchesQuery]
@@ -357,7 +364,7 @@ export default function ImportInboxPage() {
             >
               {tab}{" "}
               <span className="c">
-                {loading || loadErr ? "…" : tab === "pending" ? pendingCount : dismissedCount}
+                {loading || loadErr[tab] ? "…" : tab === "pending" ? pendingCount : dismissedCount}
               </span>
             </button>
           ))}
@@ -377,7 +384,7 @@ export default function ImportInboxPage() {
         </div>
 
         {/* ── Batch action bar (when rows selected) ── */}
-        {selectedIds.size > 0 && (
+        {!listErr && selectedIds.size > 0 && (
           <div
             className="card"
             style={{
@@ -465,7 +472,7 @@ export default function ImportInboxPage() {
         {/* ── Row list ── */}
         <div className="card listcard">
           {/* Select-all header (both tabs) */}
-          {!loading && activeRows.length > 0 && (
+          {!loading && !listErr && activeRows.length > 0 && (
             <div
               style={{
                 padding: "11px 22px",
@@ -492,7 +499,7 @@ export default function ImportInboxPage() {
           )}
           {loading ? (
             <div className="empty">Loading…</div>
-          ) : loadErr ? (
+          ) : listErr ? (
             <div className="empty">
               Couldn&apos;t load the inbox.{" "}
               <button className="btn-sm" onClick={() => { setLoading(true); refresh(); }}>
