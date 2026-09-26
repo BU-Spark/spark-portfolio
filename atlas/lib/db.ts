@@ -70,6 +70,38 @@ function getPool(): Pool {
   return globalForPool.sparkPool;
 }
 
+/**
+ * pg-cloudflare 1.4.0 (latest) end(): `this.write(data, …, () => this._cfSocket.close())`.
+ * Its closed-handler sets `_cfSocket = null` the moment the server hangs up, and
+ * pg calls `stream.end()` with no data, so the empty write runs the callback
+ * synchronously and dereferences null. That throw lands inside a promise
+ * callback, where the 'error' listener above cannot see it — a candidate for
+ * the intermittent Error 1101 that survived #64.
+ *
+ * Patched once on the prototype: if the socket is already gone there is nothing
+ * to close, so just run the callback.
+ * ponytail: remove once pg-cloudflare null-checks _cfSocket upstream.
+ */
+function guardCloudflareSocketEnd(client: Client) {
+  const stream = (client as unknown as { connection?: { stream?: object } }).connection?.stream;
+  if (!stream) return;
+  const proto = Object.getPrototypeOf(stream) as {
+    end?: (...args: unknown[]) => unknown;
+    __nullSafeEnd?: boolean;
+  };
+  if (!proto || proto.__nullSafeEnd || typeof proto.end !== "function") return;
+  const original = proto.end;
+  proto.end = function (this: { _cfSocket?: unknown }, ...args: unknown[]) {
+    if (this._cfSocket == null) {
+      const cb = args.find((a): a is () => void => typeof a === "function");
+      cb?.();
+      return this;
+    }
+    return original.apply(this, args);
+  };
+  proto.__nullSafeEnd = true;
+}
+
 async function acquireClient(): Promise<{ client: DatabaseClient; release: () => Promise<void> }> {
   const hyperdriveConnectionString = await getHyperdriveConnectionString();
   if (hyperdriveConnectionString) {
@@ -87,6 +119,7 @@ async function acquireClient(): Promise<{ client: DatabaseClient; release: () =>
       console.warn("Postgres client error", dbErrorFields(error));
     });
     await client.connect();
+    guardCloudflareSocketEnd(client);
     // Best-effort close: a socket that is already gone rejects here, and that
     // must not replace the real query result in runStatement's finally.
     return { client, release: () => client.end().catch(() => {}) };
