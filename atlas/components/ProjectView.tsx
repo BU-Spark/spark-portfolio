@@ -201,7 +201,7 @@ export default function ProjectView({ project }: { project: Project }) {
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff" }}>
+    <div style={{ background: "#fff" }}>
       <Masthead />
 
       <div

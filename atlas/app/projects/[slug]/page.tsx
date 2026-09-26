@@ -93,6 +93,9 @@ export default async function ProjectPage({
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: jsonLdHtml }}
       />
+      {/* The full-height white page lives here, not inside ProjectView, so the
+          suggest card sits right under the project instead of a screen below it. */}
+      <div style={{ minHeight: "100vh", background: "#fff" }}>
       <ProjectView project={project} />
       {/* Signed-in @bu.edu viewers can propose the missing metadata. Mounted server-
           side on the session so an anonymous visitor never receives the form at all
@@ -101,6 +104,7 @@ export default async function ProjectPage({
       {signedIn && (
         <SuggestEdit project={project} topicVocabulary={settings.topics ?? []} />
       )}
+      </div>
     </>
   );
 }
