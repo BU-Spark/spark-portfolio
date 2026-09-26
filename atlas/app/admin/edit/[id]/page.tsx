@@ -486,8 +486,10 @@ export default function EditProjectPage() {
     [contribs]
   );
 
-  const saveContribs = async () => {
-    if (readOnly) return;
+  // Returns whether the contributors were saved, so save() can stop short of
+  // redirecting when they were not.
+  const saveContribs = async (): Promise<boolean> => {
+    if (readOnly) return false;
     setContribBusy(true);
     try {
       const res = await fetch("/api/contributors", {
@@ -498,15 +500,17 @@ export default function EditProjectPage() {
       if (!res.ok) {
         const { error } = await res.json().catch(() => ({ error: "" }));
         notify("err", error || "Could not save contributors.");
-        return;
+        return false;
       }
       const d = (await res.json()) as { contributors: Contributor[] };
       const rows = toRows(d.contributors);
       setContribs(rows);
       baseContribRef.current = JSON.stringify(rows);
       notify("ok", "Contributors saved.");
+      return true;
     } catch {
       notify("err", "Could not save contributors.");
+      return false;
     } finally {
       setContribBusy(false);
     }
@@ -594,10 +598,10 @@ export default function EditProjectPage() {
     document.title = t ? `Edit: ${t} — BU Spark! Admin` : "Edit project — BU Spark! Admin";
   }, [form?.title]);
 
-  const formDirty = useMemo(
-    () => !!form && baseFormRef.current !== null && JSON.stringify(form) !== baseFormRef.current,
-    [form]
-  );
+  // Not memoized on [form]: save() moves baseFormRef without changing form, and ⌘S
+  // now keeps you on the page, so a memo would leave "Unsaved changes" stuck on.
+  const formDirty =
+    !!form && baseFormRef.current !== null && JSON.stringify(form) !== baseFormRef.current;
   const isDirty = formDirty || contribDirty;
   const { guardedPush } = useUnsavedGuard(isDirty);
 
@@ -684,7 +688,7 @@ export default function EditProjectPage() {
     return best;
   }, [form?.runs]);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (leave: boolean) => {
     if (!form || busy) return;
     // Disabled buttons aren't the only way in: the mod+s hotkey below bypasses them
     // entirely. The server 403s either way, so this is about not firing a request
@@ -733,6 +737,13 @@ export default function EditProjectPage() {
       return;
     }
     setBusy(true);
+    // Sending visibility re-runs the server's publish gate. Skip it only when it is
+    // unchanged AND the project had no description when loaded: a blurb-less
+    // record that is already visible would otherwise 422 on every unrelated save.
+    // Any other case still sends it, so blanking a live description is still gated.
+    const base = baseFormRef.current ? (JSON.parse(baseFormRef.current) as EditState) : null;
+    const sendVisibility =
+      !base || base.visibility !== form.visibility || !!base.blurb.trim();
     const payload = {
       title: form.title,
       blurb: form.blurb,
@@ -752,7 +763,7 @@ export default function EditProjectPage() {
       datasets: form.datasets.filter((d) => d.label.trim()),
       images: form.images.filter(Boolean).map((v) => toStoredKey(v as string)),
       featured: form.featured,
-      visibility: form.visibility,
+      ...(sendVisibility ? { visibility: form.visibility } : {}),
       surfaces: form.surfaces,
       // Sent ONLY by a super admin. For everyone else the key is absent, so the
       // route's super-only branch never even runs. The API rejects it regardless —
@@ -784,17 +795,24 @@ export default function EditProjectPage() {
     const data = await res.json().catch(() => ({}));
     // Snapshot the saved state so the dirty indicator clears and the guard relaxes.
     baseFormRef.current = JSON.stringify(form);
+    // Contributors have their own endpoint; the bar saves them too so pending rows
+    // are not dropped on the redirect below.
+    if (contribDirty && !(await saveContribs())) {
+      notify("err", "Project saved, but contributors were not. Try Save contributors again.");
+      return;
+    }
     if (data?.warning) {
       notify("err", `Saved with a warning: ${data.warning}`);
     } else {
       notify("ok", "Changes saved.");
     }
+    // ⌘S is a checkpoint and keeps you on the form; only the button leaves.
     // Don't redirect instantly — let the toast register, then return to admin.
-    setTimeout(() => router.push("/admin"), 1200);
-  }, [form, busy, readOnly, dupRunKeys, id, notify, router]);
+    if (leave) setTimeout(() => router.push("/admin"), 1200);
+  }, [form, busy, readOnly, dupRunKeys, id, notify, router, contribDirty, saveContribs]);
 
   useHotkey("mod+s", () => {
-    void save();
+    void save(false);
   });
 
   const doDelete = async () => {
@@ -902,7 +920,7 @@ export default function EditProjectPage() {
           </span>
         )}
         <button
-          onClick={save}
+          onClick={() => void save(true)}
           disabled={busy || readOnly}
           className="btn btn-teal"
           title={
@@ -1695,7 +1713,9 @@ export default function EditProjectPage() {
               <div style={S.hint}>
                 {!canPublish ? (
                   <>
-                    Still a draft until it has:
+                    {form.visibility === "hidden"
+                      ? "Still a draft until it has:"
+                      : "Already visible, but missing:"}
                     <ul style={{ margin: "4px 0 0 14px", padding: 0 }}>
                       {!form.blurb.trim() && <li>Description (blurb)</li>}
                       {!form.runs.some((r) => r.term && r.course.trim()) && <li>At least one course run</li>}
@@ -1874,7 +1894,7 @@ export default function EditProjectPage() {
           {/* Save bar. */}
           <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 26, flexWrap: "wrap" }}>
             <button
-              onClick={save}
+              onClick={() => void save(true)}
               disabled={busy || readOnly}
               className="btn btn-teal"
               style={{ cursor: busy ? "not-allowed" : "pointer", opacity: busy ? 0.7 : 1 }}

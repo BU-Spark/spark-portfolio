@@ -25,6 +25,7 @@ import ContactsEditor from "@/components/admin/ContactsEditor";
 import PageHeader from "@/components/admin/PageHeader";
 import { useActor, orgLabel } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
+import { useUnsavedGuard } from "@/components/admin/useUnsavedGuard";
 
 // Session cache of the admin project list for instant repeat-visit paints.
 const PROJECTS_CACHE_KEY = "spark:admin:projects:v1";
@@ -122,6 +123,7 @@ export default function AddProjectPage() {
   // Live vocab from /api/settings (admin-configurable); falls back to constants.
   const [clientTypes, setClientTypes] = useState<string[]>(SPARK_CLIENT_TYPES);
   const [termOptions, setTermOptions] = useState<string[]>(SPARK_TERMS);
+  const { guardedPush } = useUnsavedGuard(JSON.stringify(form) !== JSON.stringify(BLANK));
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/projects");
@@ -234,18 +236,23 @@ export default function AddProjectPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }).catch(() => null);
     setBusy(false);
+    if (!res) {
+      notify("err", "Network error — project not added.");
+      return;
+    }
     if (!res.ok) {
       const { error } = await res.json().catch(() => ({ error: "" }));
       notify("err", error || "Could not add the project.");
       return;
     }
+    // Nothing created here goes on the public gallery; that is a later opt-in.
     notify(
       "ok",
-      true
-        ? `"${form.title.trim()}" added to the gallery.`
-        : `"${form.title.trim()}" saved as a draft.`
+      form.visibility === "hidden"
+        ? `"${form.title.trim()}" saved as a draft.`
+        : `"${form.title.trim()}" added as ${form.visibility === "restricted" ? "Restricted" : "BU-visible"} (not on the public gallery).`
     );
     setForm(BLANK);
     refresh();
@@ -258,19 +265,27 @@ export default function AddProjectPage() {
     refresh();
   };
 
-  // One-click hide/show — flips published without opening the edit form.
+  // One-click draft <-> ready without opening the edit form. Sends an explicit
+  // visibility: the legacy `published` boolean lands on 'restricted' (see
+  // updateProject), which nobody new can see. 'internal' matches the projects
+  // list's Publish action; the public gallery stays an opt-in from that list.
   const togglePublish = async (p: Project) => {
-    const nextPublished = p.published === false; // currently a draft → publish
-    await fetch(`/api/projects/${p.id}`, {
+    const isDraft = (p.visibility ?? "hidden") === "hidden";
+    const res = await fetch(`/api/projects/${p.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ published: nextPublished }),
-    });
+      body: JSON.stringify({ visibility: isDraft ? "internal" : "hidden" }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      const { error } = res ? await res.json().catch(() => ({ error: "" })) : { error: "" };
+      notify("err", error || `Couldn't update "${p.title}".`);
+      return;
+    }
     notify(
       "ok",
-      nextPublished
-        ? `"${p.title}" is now visible in the gallery.`
-        : `"${p.title}" hidden from the gallery.`
+      isDraft
+        ? `"${p.title}" is now Ready (BU-visible, not on the public gallery).`
+        : `"${p.title}" moved back to draft.`
     );
     refresh();
   };
@@ -288,9 +303,9 @@ export default function AddProjectPage() {
         <span className="badge" title="New projects are owned by your team">
           Creating as {actor?.isSuper ? `super admin (${orgLabel(actor.org)})` : orgLabel(actor?.org)}
         </span>
-        <Link href="/admin/projects" className="btn btn-ghost">
+        <button type="button" onClick={() => guardedPush("/admin/projects")} className="btn btn-ghost">
           Cancel
-        </Link>
+        </button>
       </PageHeader>
       <div className="content">
         <div
@@ -304,8 +319,8 @@ export default function AddProjectPage() {
           {/* Form */}
           <div className="card card-pad">
             <p className="subcopy" style={{ margin: "0 0 4px" }}>
-              New projects appear in the public gallery immediately and are
-              searchable by every facet.
+              New projects start as a draft or BU-visible. The public gallery is
+              a separate opt-in from the projects list.
             </p>
 
             {/* ── PUBLIC DETAILS ── */}
@@ -647,7 +662,7 @@ export default function AddProjectPage() {
                       : undefined
                   }
                 >
-                  {busy ? "Adding…" : "Add to gallery"}
+                  {busy ? "Adding…" : "Add project"}
                 </button>
                 <button className="tlink" onClick={() => setForm(BLANK)}>
                   Clear
@@ -803,8 +818,7 @@ export default function AddProjectPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Nothing yet. Projects you add appear here and in the public
-                  gallery for everyone.
+                  Nothing yet. Projects you add appear here.
                 </div>
               ) : (
                 <div>
@@ -833,7 +847,7 @@ export default function AddProjectPage() {
                           }}
                         >
                           {p.title}
-                          {p.published === false && (
+                          {(p.visibility ?? "hidden") === "hidden" && (
                             <span className="badge b-draft">Draft</span>
                           )}
                         </div>
@@ -857,14 +871,14 @@ export default function AddProjectPage() {
                           <button
                             onClick={() => togglePublish(p)}
                             title={
-                              p.published === false
-                                ? "Show in the public gallery"
-                                : "Hide from the public gallery"
+                              (p.visibility ?? "hidden") === "hidden"
+                                ? "Mark ready (BU-visible, not on the public gallery)"
+                                : "Move back to draft"
                             }
                             className="tlink"
                             style={{ color: "var(--ink-3)" }}
                           >
-                            {p.published === false ? "Show" : "Hide"}
+                            {(p.visibility ?? "hidden") === "hidden" ? "Mark ready" : "Back to draft"}
                           </button>
                         </div>
                       </div>
@@ -926,8 +940,8 @@ export default function AddProjectPage() {
                 }}
               >
                 Additions are saved to the shared Spark! database and images to
-                object storage, so everything you add is visible to all visitors
-                immediately.
+                object storage. Visitors see a project only once it is opted in
+                to the public gallery.
               </p>
             </div>
           </div>
