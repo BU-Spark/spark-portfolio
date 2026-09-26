@@ -67,7 +67,9 @@ export default function AdminRail() {
       if (Array.isArray(d?.items)) setApprovalCount(d.items.length);
     }).catch(() => {});
     return () => ac.abort();
-  }, []);
+    // Refetch on navigation: the rail stays mounted across admin pages, so without
+    // this the badges keep their first-load counts after work is cleared.
+  }, [pathname]);
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");

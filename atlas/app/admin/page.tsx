@@ -219,6 +219,12 @@ export default function AdminDashboardPage() {
           <div style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 16, display: "flex", alignItems: "center", gap: 10 }}>
             Needs attention
             {!loading && needsInfo.length > 0 && <span className="countpill">{needsInfo.length}</span>}
+            {/* Own-team only, while "Manage all" lists every team's gaps. */}
+            {actor && !actor.isSuper && (
+              <span style={{ fontFamily: "var(--mono)", fontSize: 12, fontWeight: 400, opacity: 0.6 }}>
+                your team
+              </span>
+            )}
           </div>
           <Link href="/admin/projects?tab=needsInfo" style={{ fontFamily: "var(--mono)", fontSize: 12, color: ACCENT, textDecoration: "none" }}>
             Manage all →

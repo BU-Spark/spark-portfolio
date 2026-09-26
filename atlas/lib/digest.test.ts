@@ -3,7 +3,7 @@ import { buildDigest, hasActionableWork, type DigestInput } from "./digest";
 
 const base: DigestInput = {
   orgLabel: "Spark!",
-  waiting: { screenshots: 0, nudge: 0, inbox: 0, draft: 0 },
+  waiting: { screenshots: 0, nudge: 0, inbox: 0, draft: 0, suggestion: 0 },
   readyToPublish: 0,
   oldestDays: 0,
   backlog: [],
@@ -25,7 +25,7 @@ describe("hasActionableWork", () => {
   });
 
   it("fires on any single waiting item", () => {
-    for (const k of ["screenshots", "nudge", "inbox", "draft"] as const) {
+    for (const k of ["screenshots", "nudge", "inbox", "draft", "suggestion"] as const) {
       expect(hasActionableWork(input({ waiting: { ...base.waiting, [k]: 1 } }))).toBe(true);
     }
   });
@@ -42,6 +42,11 @@ describe("buildDigest", () => {
     // A list of zeroes reads as "nothing to do" and pushes real items below the fold.
     expect(text).not.toContain("screenshot set");
     expect(text).not.toContain("upload link");
+  });
+
+  it("lists pending community suggestions", () => {
+    const text = buildDigest(input({ waiting: { ...base.waiting, suggestion: 3 } }));
+    expect(text).toContain("3 community suggestions to review");
   });
 
   it("separates publishable drafts from blocked ones", () => {
