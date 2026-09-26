@@ -784,8 +784,8 @@ export default function EditProjectPage() {
       notify("err", "Network error — changes not saved.");
       return;
     }
-    setBusy(false);
     if (!res.ok) {
+      setBusy(false);
       const { error, warning } = await res
         .json()
         .catch(() => ({ error: "", warning: "" }));
@@ -796,9 +796,14 @@ export default function EditProjectPage() {
     // Snapshot the saved state so the dirty indicator clears and the guard relaxes.
     baseFormRef.current = JSON.stringify(form);
     // Contributors have their own endpoint; the bar saves them too so pending rows
-    // are not dropped on the redirect below.
+    // are not dropped on the redirect below. Still busy here, so a second click or
+    // ⌘S can't fire a second PATCH while this PUT is in flight.
     if (contribDirty && !(await saveContribs())) {
-      notify("err", "Project saved, but contributors were not. Try Save contributors again.");
+      setBusy(false);
+      notify(
+        "err",
+        `Project saved${data?.warning ? ` with a warning (${data.warning})` : ""}, but contributors were not. Try Save contributors again.`
+      );
       return;
     }
     if (data?.warning) {
@@ -808,7 +813,9 @@ export default function EditProjectPage() {
     }
     // ⌘S is a checkpoint and keeps you on the form; only the button leaves.
     // Don't redirect instantly — let the toast register, then return to admin.
+    // Leaving stays busy so a second click can't queue a second PATCH + redirect.
     if (leave) setTimeout(() => router.push("/admin"), 1200);
+    else setBusy(false);
   }, [form, busy, readOnly, dupRunKeys, id, notify, router, contribDirty, saveContribs]);
 
   useHotkey("mod+s", () => {

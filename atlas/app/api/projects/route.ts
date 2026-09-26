@@ -9,7 +9,7 @@ import {
   getProjectsForList,
   type NewProject,
 } from "@/lib/db";
-import { disciplineFromCourse } from "@/lib/data";
+import { disciplineFromCourse, VISIBILITIES } from "@/lib/data";
 import { publishBlockers } from "@/lib/project";
 
 function slugify(s: string): string {
@@ -123,13 +123,16 @@ export async function POST(req: Request) {
     visibility: typeof body.visibility === "string" ? body.visibility : undefined,
   };
 
-  // Same publish gate as PATCH: anything but an explicit draft leaves draft, so it
-  // needs a description. Without this a blurb-less project is created BU-visible and
-  // then every later edit-form save 422s on the PATCH gate.
-  const isDraft =
-    project.visibility === "hidden" ||
-    (project.visibility === undefined && body.published === false);
-  if (!isDraft) {
+  // Same publish gate as PATCH: anything that is not stored as a draft needs a
+  // description. Without this a blurb-less project is created BU-visible and then
+  // every later edit-form save 422s on the PATCH gate. Resolves visibility exactly
+  // as addProject does, so the gate judges what will actually be stored.
+  const storedVisibility = VISIBILITIES.includes((project.visibility ?? "") as never)
+    ? project.visibility
+    : project.published === true
+      ? "internal"
+      : "hidden";
+  if (storedVisibility !== "hidden") {
     const blockers = publishBlockers({ blurb: project.blurb, runs });
     if (blockers.length) {
       return Response.json(

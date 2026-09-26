@@ -193,12 +193,15 @@ export default function AddProjectPage() {
       return { ...f, images };
     });
 
-  // Required to form one valid run + the project title. partner/client/blurb/discipline
-  // are optional here (discipline is auto-derived from course; backfill the rest later).
+  // Required to form one valid run + the project title. The blurb is required too
+  // unless saving as a Draft: POST /api/projects 422s a blurb-less project that
+  // leaves draft. partner/client/discipline are optional (discipline is auto-derived
+  // from course; backfill the rest later).
   const required: (keyof FormState)[] = [
     "title",
     "term",
     "course",
+    ...(form.visibility !== "hidden" ? (["blurb"] as const) : []),
   ];
   const missing = required.filter((k) => !String(form[k]).trim());
   const valid = missing.length === 0;
@@ -342,7 +345,9 @@ export default function AddProjectPage() {
             </div>
 
             <div className="field">
-              <label className="lab">Short description</label>
+              <label className="lab">
+                Short description {form.visibility !== "hidden" && <span className="req">*</span>}
+              </label>
               {/* PD auto-fill control */}
               <div className="pdwrap">
                 <div className="pl">Auto-fill from PD doc</div>
@@ -645,8 +650,9 @@ export default function AddProjectPage() {
                   <option value="internal">{VISIBILITY_LABELS.internal}</option>
                 </select>
                 <div style={{ fontSize: 12.5, color: "var(--ink-4)", marginTop: 4 }}>
-                  The public gallery is opt-in — add it from the projects list once it
-                  has screenshots and reads well.
+                  A description is required unless Draft. The public gallery is
+                  opt-in — add it from the projects list once it has screenshots and
+                  reads well.
                 </div>
               </div>
               <div
