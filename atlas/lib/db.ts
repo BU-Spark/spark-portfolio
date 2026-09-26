@@ -2837,7 +2837,9 @@ export async function listOpenApprovals(scope: {
        -- emails anyone, so an unsent link is exactly "not asked yet" — chasing a
        -- PM over one blames them for an email that was never sent, and this feeds
        -- the weekly digest, so it escalates by mail too.
-       SELECT 'nudge', u.token, p.title,
+       -- ref is the project id, not the token: Chase opens the edit page,
+       -- whose upload widget can re-email the open link.
+       SELECT 'nudge', u.project_id, p.title,
               'No upload yet from ' || coalesce(u.last_emailed_to, u.recipient, 'the recipient')
                 || ' — link expires ' || to_char(u.expires_at, 'Mon DD'),
               p.owner_org, u.last_emailed_at

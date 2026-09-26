@@ -75,9 +75,9 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
 
   // Outreach only lists projects with no images, so this is the only in-app way
   // to send a link for a project that already has some. The email route sends
-  // the project's newest open link, which is the one just generated.
-  const send = async () => {
-    const to = email.trim();
+  // the project's newest usable open link: the one just generated, or the
+  // `sendableToken` row below.
+  const send = async (to: string) => {
     if (!to) return;
     setSending(true);
     setError(null);
@@ -96,6 +96,14 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
       setSending(false);
     }
   };
+
+  // `existing` is newest first, the order the email route picks from, so only
+  // this row gets an Email button: on an older open row it would send a
+  // different link than the one shown.
+  const sendableToken = existing.find(
+    (r) => r.status === "open" && new Date(r.expiresAt).getTime() > Date.now()
+  )?.token;
+  const rowTo = (r: ExistingReq) => email.trim() || r.recipient || "";
 
   const copy = async (text: string) => {
     try {
@@ -213,7 +221,7 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
             {result.emailConfigured && email.trim() && (
               <button
                 type="button"
-                onClick={send}
+                onClick={() => send(email.trim())}
                 disabled={sending}
                 style={{
                   padding: "8px 14px",
@@ -306,6 +314,25 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
                     }}
                   >
                     Copy link
+                  </button>
+                )}
+                {r.token === sendableToken && rowTo(r) && (
+                  <button
+                    type="button"
+                    onClick={() => send(rowTo(r))}
+                    disabled={sending}
+                    style={{
+                      border: `1px solid ${ACCENT}`,
+                      background: "#fff",
+                      borderRadius: 5,
+                      padding: "3px 9px",
+                      fontSize: 11.5,
+                      cursor: sending ? "not-allowed" : "pointer",
+                      color: ACCENT,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {sending ? "Sending…" : sentTo ? `Emailed ${sentTo} ✓` : `Email ${rowTo(r)}`}
                   </button>
                 )}
               </div>
