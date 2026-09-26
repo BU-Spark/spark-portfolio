@@ -2910,7 +2910,8 @@ export async function listOpenApprovals(scope: {
 /**
  * Standing data-quality counts, keyed by the same labels missingInfo() produces so
  * the digest and the projects-list gap chips can't disagree about what a gap is.
- * One exception: 'PD link' is digest-only (admin-only data, no gap chip).
+ * One exception: 'PD link' has no gap chip (admin-only data), so the approvals page
+ * shows it as a plain count rather than a filter link.
  *
  * Deliberately separate from listOpenApprovals: these are conditions, not queued
  * work. Nothing is "waiting" on a missing tech stack — 100% of the catalog has no

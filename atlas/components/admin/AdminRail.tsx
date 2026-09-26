@@ -63,7 +63,7 @@ export default function AdminRail() {
     fetch("/api/inbox", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (d?.count != null) setInboxCount(d.count);
     }).catch(() => {});
-    fetch("/api/approvals", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+    fetch("/api/approvals?items=1", { signal: ac.signal }).then((r) => (r.ok ? r.json() : null)).then((d) => {
       if (Array.isArray(d?.items)) setApprovalCount(d.items.length);
     }).catch(() => {});
     return () => ac.abort();

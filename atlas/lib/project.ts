@@ -91,6 +91,9 @@ export function missingTeam(p: Project): string[] {
   return out;
 }
 
+/** The missingInfo() labels the projects page offers as gap filter chips. */
+export const GAP_FIELDS = ["Course", "Tech stack", "GitHub repo", "Description", "Images", "Topics", "Contributors"] as const;
+
 export function missingInfo(p: Project): string[] {
   const out: string[] = [];
   if (!p.runs.some((r) => r.course?.trim())) out.push("Course");

@@ -15,6 +15,7 @@ import Link from "next/link";
 import PageHeader from "@/components/admin/PageHeader";
 import { useActor, orgLabel } from "@/components/admin/ActorContext";
 import type { ApprovalKind } from "@/lib/db";
+import { GAP_FIELDS } from "@/lib/project";
 
 interface ApprovalItem {
   kind: ApprovalKind;
@@ -259,19 +260,28 @@ export default function ApprovalsPage() {
           <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 22px" }}>
             {Object.entries(backlog)
               .sort((a, b) => b[1] - a[1])
-              .map(([label, n]) => (
-                <Link
-                  key={label}
-                  href={`/admin/projects?gap=${encodeURIComponent(label)}`}
-                  className="kv"
-                  style={{ textDecoration: "none", display: "flex", gap: 7, alignItems: "baseline" }}
-                >
-                  <span className="v" style={{ fontFamily: "var(--display)", fontWeight: 700 }}>
-                    {n}
+              .map(([label, n]) => {
+                const body = (
+                  <>
+                    <span className="v" style={{ fontFamily: "var(--display)", fontWeight: 700 }}>
+                      {n}
+                    </span>
+                    <span className="k">no {label.toLowerCase()}</span>
+                  </>
+                );
+                const style = { textDecoration: "none", display: "flex", gap: 7, alignItems: "baseline" };
+                // A label with no gap chip (PD link) would deep-link to an unfiltered
+                // list that looks filtered, so it stays a plain count.
+                return (GAP_FIELDS as readonly string[]).includes(label) ? (
+                  <Link key={label} href={`/admin/projects?gap=${encodeURIComponent(label)}`} className="kv" style={style}>
+                    {body}
+                  </Link>
+                ) : (
+                  <span key={label} className="kv" style={style} title="No gap filter on Projects for this one">
+                    {body}
                   </span>
-                  <span className="k">no {label.toLowerCase()}</span>
-                </Link>
-              ))}
+                );
+              })}
           </div>
         )}
         </div>

@@ -8,12 +8,14 @@
 import { requireAdmin } from "@/lib/actor";
 import { listOpenApprovals, backlogCounts } from "@/lib/db";
 
-export async function GET() {
+export async function GET(req: Request) {
   const g = await requireAdmin();
   if (!g.ok) return g.res;
+  // ?items=1 (the rail badge) needs only the queue, not the backlog count scans.
+  const wantBacklog = !new URL(req.url).searchParams.has("items");
   const [items, backlog] = await Promise.all([
     listOpenApprovals(g.actor),
-    backlogCounts(g.actor),
+    wantBacklog ? backlogCounts(g.actor) : undefined,
   ]);
   return Response.json({ items, backlog, org: g.actor.org, isSuper: g.actor.isSuper });
 }
