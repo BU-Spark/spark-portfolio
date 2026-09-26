@@ -151,6 +151,7 @@ export default async function ContributePage({
         initialImages={reqRow.images}
         reviewNote={reqRow.reviewNote}
         initialSubmitted={reqRow.status === "submitted"}
+        replyTo={REPLY_TO}
       />
     </Shell>
   );

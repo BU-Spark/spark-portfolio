@@ -253,10 +253,19 @@ function ReviewPanel({
       setItems(requests);
       onCount(requests.length);
       // Keep curated picks on cards still in the queue; approving or rejecting one
-      // card must not reset the others before an "Approve all".
+      // card must not reset the others before an "Approve all". Drop picks that are
+      // no longer valid (approving a sibling request for the same project rewrites
+      // its images), else approve fails with "not part of this project".
       setSelected((prev) =>
         Object.fromEntries(
-          requests.map((r) => [r.token, prev[r.token] ?? new Set(defaultSelection(r).slice(0, CAP))])
+          requests.map((r) => {
+            const valid = new Set([...(r.images ?? []), ...(r.projectImages ?? [])]);
+            const p = prev[r.token];
+            const kept = [...(p ?? [])].filter((k) => valid.has(k));
+            // A deliberate empty selection stays empty; fall back only when nothing
+            // was picked yet or every pick went stale.
+            return [r.token, p && (kept.length || p.size === 0) ? new Set(kept) : new Set(defaultSelection(r).slice(0, CAP))];
+          })
         )
       );
     } catch (e) {
