@@ -39,6 +39,8 @@ export default function ImportInboxPage() {
   const [aliases, setAliases] = useState<AliasEntry[]>([]);
   const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  // Per-list load errors: a failed tab must not blank the other tab's rows.
+  const [loadErr, setLoadErr] = useState({ pending: false, dismissed: false });
   // Global busy guard: any single-row mutation in flight disables every row's actions.
   const [busy, setBusy] = useState<string | null>(null);
   const [busyAlias, setBusyAlias] = useState<string | null>(null);
@@ -72,11 +74,25 @@ export default function ImportInboxPage() {
     });
 
   const refresh = useCallback(async () => {
-    const [rPending, rDismissed, rp] = await Promise.all([
-      fetch("/api/inbox"),
-      fetch("/api/inbox?status=dismissed"),
-      fetch("/api/projects"),
-    ]);
+    let rPending: Response, rDismissed: Response, rp: Response;
+    try {
+      [rPending, rDismissed, rp] = await Promise.all([
+        fetch("/api/inbox"),
+        fetch("/api/inbox?status=dismissed"),
+        fetch("/api/projects"),
+      ]);
+    } catch {
+      setLoadErr({ pending: true, dismissed: true });
+      setSelectedIds(new Set());
+      setLoading(false);
+      return;
+    }
+    // A failed load must not fall through to the "Inbox empty" celebration.
+    setLoadErr({ pending: !rPending.ok, dismissed: !rDismissed.ok });
+    // Selection over rows that are no longer on screen must not drive a bulk action.
+    if (!rPending.ok || !rDismissed.ok) setSelectedIds(new Set());
+    // Projects only feed the merge-target picker; don't hide the list over it.
+    if (!rp.ok) notify("err", "Couldn't load projects for merge.");
     if (rPending.ok) {
       const d = await rPending.json();
       setRows(d.rows ?? []);
@@ -95,7 +111,7 @@ export default function ImportInboxPage() {
       );
     }
     setLoading(false);
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     refresh();
@@ -130,6 +146,7 @@ export default function ImportInboxPage() {
   const pendingCount = rows.length;
   const dismissedCount = dismissedRows.length;
   const baseRows = viewTab === "pending" ? rows : dismissedRows;
+  const listErr = loadErr[viewTab];
   const activeRows = useMemo(
     () => baseRows.filter(matchesQuery),
     [baseRows, matchesQuery]
@@ -254,6 +271,7 @@ export default function ImportInboxPage() {
   };
 
   const removeAliasAct = async (nameKey: string) => {
+    if (!window.confirm(`Remove the saved alias "${nameKey}"? Future imports will no longer match this name automatically.`)) return;
     setBusyAlias(nameKey);
     const res = await fetch("/api/inbox", {
       method: "POST",
@@ -346,7 +364,7 @@ export default function ImportInboxPage() {
             >
               {tab}{" "}
               <span className="c">
-                {loading ? "…" : tab === "pending" ? pendingCount : dismissedCount}
+                {loading || loadErr[tab] ? "…" : tab === "pending" ? pendingCount : dismissedCount}
               </span>
             </button>
           ))}
@@ -366,7 +384,7 @@ export default function ImportInboxPage() {
         </div>
 
         {/* ── Batch action bar (when rows selected) ── */}
-        {selectedIds.size > 0 && (
+        {!listErr && selectedIds.size > 0 && (
           <div
             className="card"
             style={{
@@ -454,7 +472,7 @@ export default function ImportInboxPage() {
         {/* ── Row list ── */}
         <div className="card listcard">
           {/* Select-all header (both tabs) */}
-          {!loading && activeRows.length > 0 && (
+          {!loading && !listErr && activeRows.length > 0 && (
             <div
               style={{
                 padding: "11px 22px",
@@ -481,6 +499,13 @@ export default function ImportInboxPage() {
           )}
           {loading ? (
             <div className="empty">Loading…</div>
+          ) : listErr ? (
+            <div className="empty">
+              Couldn&apos;t load the inbox.{" "}
+              <button className="btn-sm" onClick={() => { setLoading(true); refresh(); }}>
+                Retry
+              </button>
+            </div>
           ) : activeRows.length === 0 ? (
             query.trim() ? (
               <div className="empty">No rows match “{query.trim()}”.</div>

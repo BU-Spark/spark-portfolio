@@ -766,7 +766,7 @@ export default function ImportCSVPage() {
                   {[
                     { label: "Received", value: result.received ?? 0 },
                     { label: "Updated", value: result.updated ?? 0 },
-                    { label: "Inboxed", value: result.inboxed ?? 0 },
+                    { label: "New in inbox", value: result.inboxedNew ?? result.inboxed ?? 0 },
                     { label: "Skipped", value: result.skippedCount ?? 0 },
                   ].map(({ label, value }) => (
                     <div
@@ -864,23 +864,32 @@ export default function ImportCSVPage() {
                     someone reading the crossOrg list" — which nothing rendered,
                     so the names vanished between Received and Updated with no
                     trace. */}
-                {result.crossOrg && result.crossOrg.length > 0 && (
-                  <div style={{ marginTop: 14 }}>
-                    <div style={nameListLabelStyle}>
-                      Owned by the other team (not imported, not queued)
+                {/* crossOrg also carries FUZZY cross-org hits, which lib/import.ts
+                    still pushes to `skipped` and inboxes. Only the ones absent from
+                    `skipped` are exact, and only those are "not queued". */}
+                {[
+                  { exact: true, label: "Owned by the other team (not imported, not queued)" },
+                  { exact: false, label: "Resembles the other team's project (listed as unmatched above; check before creating one)" },
+                ].map(({ exact, label }) => {
+                  const names = (result.crossOrg ?? []).filter(
+                    (n) => (result.skipped ?? []).includes(n) !== exact
+                  );
+                  return names.length > 0 && (
+                    <div key={label} style={{ marginTop: 14 }}>
+                      <div style={nameListLabelStyle}>{label}</div>
+                      <div
+                        style={{
+                          fontFamily: "var(--mono)",
+                          fontSize: 12,
+                          color: "var(--sec)",
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {names.join(", ")}
+                      </div>
                     </div>
-                    <div
-                      style={{
-                        fontFamily: "var(--mono)",
-                        fontSize: 12,
-                        color: "var(--sec)",
-                        lineHeight: 1.6,
-                      }}
-                    >
-                      {result.crossOrg.join(", ")}
-                    </div>
-                  </div>
-                )}
+                  );
+                })}
 
                 {/* A fuzzy hit WROTE to a real project on an edit-distance-2
                     guess. Disclosed rather than assumed correct: it is the one

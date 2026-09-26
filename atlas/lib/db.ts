@@ -763,6 +763,9 @@ export async function removeProject(id: string): Promise<void> {
   );
   for (const k of rows[0]?.images ?? []) await deleteObject(k);
   await query(`DELETE FROM projects WHERE id = $1`, [id]);
+  // project_aliases has no FK; drop them or the next import resolves to a dead id.
+  await ensureIngestTables();
+  await query(`DELETE FROM project_aliases WHERE project_id = $1`, [id]);
 }
 
 // Scalar project-level winners the merge modal resolved. Anything omitted falls
@@ -1518,23 +1521,31 @@ export async function restoreInboxRow(id: number, actor: Actor): Promise<boolean
   return rows.length > 0;
 }
 
-export async function listAliases(): Promise<{ nameKey: string; projectId: string; createdAt: string }[]> {
+// Same owner_org scope as removeAlias below, so the panel lists only aliases the
+// actor can actually remove. LEFT JOIN: an orphan (project deleted) still shows to
+// super admins, who can remove it; for a scoped admin p.owner_org is NULL, so no.
+export async function listAliases(actor: Actor): Promise<{ nameKey: string; projectId: string; createdAt: string }[]> {
   await ensureIngestTables();
   const rows = await query<{ name_key: string; project_id: string; created_at: string }>(
-    `SELECT name_key, project_id, created_at FROM project_aliases ORDER BY created_at DESC`
+    `SELECT a.name_key, a.project_id, a.created_at
+       FROM project_aliases a LEFT JOIN projects p ON p.id = a.project_id
+      WHERE ($2 OR p.owner_org = $1)
+      ORDER BY a.created_at DESC`,
+    [actor.org, actor.isSuper]
   );
   return rows.map((r) => ({ nameKey: r.name_key, projectId: r.project_id, createdAt: r.created_at }));
 }
 
 // Scoped by the OWNER of the project the alias resolves to: deleting it changes
 // what that team's next PD sync will match, so it is their data even though the
-// row itself carries no org. Returns false when the alias is absent or foreign.
+// row itself carries no org. Super admins can also remove orphans (project gone).
+// Returns false when the alias is absent or foreign.
 export async function removeAlias(nameKey: string, actor: Actor): Promise<boolean> {
   await ensureIngestTables();
   const rows = await query<{ name_key: string }>(
     `DELETE FROM project_aliases a
-      USING projects p
-      WHERE a.name_key = $1 AND p.id = a.project_id AND ($3 OR p.owner_org = $2)
+      WHERE a.name_key = $1
+        AND ($3 OR EXISTS (SELECT 1 FROM projects p WHERE p.id = a.project_id AND p.owner_org = $2))
       RETURNING a.name_key`,
     [nameKey, actor.org, actor.isSuper]
   );
