@@ -6,9 +6,9 @@ import {
   getProjects,
   getProjectsForViewer,
   getGallerySettings,
-  getDistinctTerms,
   countStudentExperiences,
 } from "@/lib/db";
+import { BU_VISIBLE } from "@/lib/data";
 import { parseFilterParams } from "@/lib/filters";
 import { auth } from "@/auth";
 
@@ -30,11 +30,11 @@ export default async function Home({
   // branch inside it would serve one visitor's rows to everybody.
   const session = await auth();
   const signedIn = !!session?.user?.email;
-  const [projects, settings, terms, students, sp] = await Promise.all([
+  const [projects, settings, students, sp] = await Promise.all([
     signedIn ? getProjectsForViewer() : getProjects(),
     getGallerySettings(),
-    getDistinctTerms(),
-    countStudentExperiences(),
+    // Same visibility tier as the project read above, so the two hero stats match.
+    countStudentExperiences(signedIn ? BU_VISIBLE : ["public"]),
     searchParams,
   ]);
   const initialFilters = parseFilterParams(sp);
@@ -48,7 +48,6 @@ export default async function Home({
         projects={sparkProjects}
         initialFilters={initialFilters}
         settings={settings}
-        terms={terms}
         studentExperiences={students}
       />
     </div>

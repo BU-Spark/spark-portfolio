@@ -14,6 +14,11 @@ export type CdsProject = {
   topics: string[];
   term: string;
   program: string;
+  // Every run's value, not just the latest: facets match a project if ANY run
+  // qualifies, as the Spark gallery does. The scalars above are display-only.
+  disciplines: string[];
+  terms: string[];
+  programs: string[];
   partner: string; // the CLIENT ORGANISATION (not a person)
   partnerUrl?: string; // the client org's website (link icon, only if set)
   clientDesc?: string; // "about the client" blurb (expandable dropdown, only if set)
@@ -66,17 +71,17 @@ export default function CDSGallery({ projects }: { projects: CdsProject[] }) {
   const active = disc.size + topics.size + ctypes.size + progs.size + terms.size + (q ? 1 : 0);
   const clearAll = () => { setQ(""); setDisc(new Set()); setTopics(new Set()); setCtypes(new Set()); setProgs(new Set()); setTerms(new Set()); };
 
-  const count = (key: keyof CdsProject | "topics") => {
+  const count = (key: "disciplines" | "topics" | "clientType" | "programs" | "terms") => {
     const m: Record<string, number> = {};
     for (const p of projects) {
-      const vals = key === "topics" ? p.topics : [p[key] as string];
+      const vals = key === "clientType" ? [p.clientType] : p[key];
       for (const v of vals) if (v) m[v] = (m[v] || 0) + 1;
     }
     return m;
   };
   const counts = useMemo(() => ({
-    discipline: count("discipline"), topics: count("topics"),
-    clientType: count("clientType"), program: count("program"), term: count("term"),
+    discipline: count("disciplines"), topics: count("topics"),
+    clientType: count("clientType"), program: count("programs"), term: count("terms"),
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [projects]);
 
@@ -87,24 +92,24 @@ export default function CDSGallery({ projects }: { projects: CdsProject[] }) {
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
     };
     return {
-      disciplines: uniq(projects.map((p) => p.discipline)).sort(byPref),
+      disciplines: uniq(projects.flatMap((p) => p.disciplines)).sort(byPref),
       topics: uniq(projects.flatMap((p) => p.topics)).sort((a, b) => a.localeCompare(b)),
       clientTypes: uniq(projects.map((p) => p.clientType)).sort((a, b) => a.localeCompare(b)),
-      programs: uniq(projects.map((p) => p.program)).sort((a, b) => a.localeCompare(b)),
-      terms: uniq(projects.map((p) => p.term)).sort((a, b) => termOrder(b) - termOrder(a)),
+      programs: uniq(projects.flatMap((p) => p.programs)).sort((a, b) => a.localeCompare(b)),
+      terms: uniq(projects.flatMap((p) => p.terms)).sort((a, b) => termOrder(b) - termOrder(a)),
     };
   }, [projects]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const list = projects.filter((p) => {
-      if (disc.size && !disc.has(p.discipline)) return false;
+      if (disc.size && !p.disciplines.some((d) => disc.has(d))) return false;
       if (topics.size && !p.topics.some((t) => topics.has(t))) return false;
       if (ctypes.size && !ctypes.has(p.clientType)) return false;
-      if (progs.size && !progs.has(p.program)) return false;
-      if (terms.size && !terms.has(p.term)) return false;
+      if (progs.size && !p.programs.some((x) => progs.has(x))) return false;
+      if (terms.size && !p.terms.some((t) => terms.has(t))) return false;
       if (needle) {
-        const hay = [p.title, p.blurb, p.partner, p.discipline, p.program, ...p.topics].join(" ").toLowerCase();
+        const hay = [p.title, p.blurb, p.partner, ...p.disciplines, ...p.programs, ...p.topics, ...(p.tech ?? [])].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
