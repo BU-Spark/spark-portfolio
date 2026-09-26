@@ -30,6 +30,8 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existing, setExisting] = useState<ExistingReq[]>([]);
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   const origin = typeof window !== "undefined" ? window.location.origin : "";
 
@@ -50,6 +52,7 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
     setError(null);
     setResult(null);
     setCopied(false);
+    setSentTo(null);
     try {
       const res = await fetch("/api/upload-requests", {
         method: "POST",
@@ -67,6 +70,30 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
       setError(e instanceof Error ? e.message : "Could not generate link.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Outreach only lists projects with no images, so this is the only in-app way
+  // to send a link for a project that already has some. The email route sends
+  // the project's newest open link, which is the one just generated.
+  const send = async () => {
+    const to = email.trim();
+    if (!to) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/upload-requests/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, email: to }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || "Could not send.");
+      setSentTo(d.to ?? to);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not send.");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -114,7 +141,7 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="PM email (optional — for your records / auto-send)"
+          placeholder="PM email (optional — to email the link)"
           style={{ flex: 1 }}
         />
         <button
@@ -183,11 +210,34 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
             >
               {copied ? "Copied ✓" : "Copy"}
             </button>
+            {result.emailConfigured && email.trim() && (
+              <button
+                type="button"
+                onClick={send}
+                disabled={sending}
+                style={{
+                  padding: "8px 14px",
+                  border: `1px solid ${ACCENT}`,
+                  borderRadius: 6,
+                  cursor: sending ? "not-allowed" : "pointer",
+                  background: "#fff",
+                  color: ACCENT,
+                  fontFamily: "var(--mono)",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {sending ? "Sending…" : `Email ${email.trim()}`}
+              </button>
+            )}
           </div>
           <div style={{ fontSize: 12, color: "#6a6f74", marginTop: 8 }}>
-            {result.emailConfigured
-              ? "Link created — nothing has been sent. Copy it, or email it from Admin → Uploads."
-              : "Copy this link and send it to the PM (sending isn't set up yet)."}
+            {sentTo
+              ? `Emailed to ${sentTo}.`
+              : result.emailConfigured
+                ? "Link created — nothing has been sent. Copy it, or type the PM's email above and send it."
+                : "Copy this link and send it to the PM (sending isn't set up yet)."}
           </div>
         </div>
       )}
@@ -198,7 +248,10 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
             Existing links for this project
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {existing.map((r) => (
+            {existing.map((r) => {
+              // Nothing flips a row to 'expired'; an open row past its date is dead.
+              const expired = r.status === "open" && new Date(r.expiresAt).getTime() < Date.now();
+              return (
               <div
                 key={r.token}
                 style={{
@@ -217,26 +270,28 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
                     fontSize: 10.5,
                     padding: "2px 7px",
                     borderRadius: 4,
-                    background:
-                      r.status === "submitted"
+                    background: expired
+                      ? "#f3e3e1"
+                      : r.status === "submitted"
                         ? "color-mix(in oklab, #a86700 16%, #fff)"
                         : r.status === "approved"
                           ? `color-mix(in oklab, ${ACCENT} 16%, #fff)`
                           : "#eee",
-                    color:
-                      r.status === "submitted"
+                    color: expired
+                      ? "#b3261e"
+                      : r.status === "submitted"
                         ? "#a86700"
                         : r.status === "approved"
                           ? `color-mix(in oklab, ${ACCENT} 72%, #000)`
                           : "#6a6f74",
                   }}
                 >
-                  {STATUS_LABEL[r.status]}
+                  {expired ? "Expired" : STATUS_LABEL[r.status]}
                 </span>
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {r.recipient || "no email"} · expires {new Date(r.expiresAt).toLocaleDateString()}
                 </span>
-                {r.status !== "approved" && (
+                {r.status !== "approved" && !expired && (
                   <button
                     type="button"
                     onClick={() => copy(`${origin}/contribute/${r.token}`)}
@@ -254,7 +309,8 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

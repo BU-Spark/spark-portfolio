@@ -36,16 +36,22 @@ export async function GET(req: Request) {
   const g = await requireAdmin();
   if (!g.ok) return g.res;
 
-  const [projects, peopleMap, open] = await Promise.all([
+  const [projects, peopleMap, open, submitted] = await Promise.all([
     getProjectsForList(),
     getPeopleMap(),
     listUploadRequests("open", g.actor),
+    listUploadRequests("submitted", g.actor),
   ]);
   // Carry the whole request, not just the token: the UI needs to know whether a
   // link was ever EMAILED. That lives only in the database — it used to live in
   // React state, so a page reload made every already-sent row look unsent and
   // invited a second round of mail to the same people.
-  const openByProject = new Map(open.map((r) => [r.projectId, r]));
+  // First wins: the list is newest-first, and the email route sends the newest
+  // open link (open.find), so the row must show that same token.
+  const openByProject = new Map<string, (typeof open)[number]>();
+  for (const r of open) if (!openByProject.has(r.projectId)) openByProject.set(r.projectId, r);
+  // A PM who already delivered is waiting on us, not the other way round.
+  const awaitingReview = new Set(submitted.map((r) => r.projectId));
   const base = baseUrl(req);
 
   const candidates = projects
@@ -66,6 +72,7 @@ export async function GET(req: Request) {
         openUrl: request ? `${base}/contribute/${request.token}` : null,
         emailedAt: request?.emailedAt ?? null,
         emailedTo: request?.emailedTo ?? null,
+        awaitingReview: awaitingReview.has(p.id),
         semester: latestTerm(p.runs),
       };
     });
@@ -99,13 +106,15 @@ export async function POST(req: Request) {
   const pg = await requireProjects(ids);
   if (!pg.ok) return pg.res;
 
-  const [projects, peopleMap, open] = await Promise.all([
+  const [projects, peopleMap, open, submitted] = await Promise.all([
     getProjectsForList(),
     getPeopleMap(),
     listUploadRequests("open", g.actor),
+    listUploadRequests("submitted", g.actor),
   ]);
   const byId = new Map(projects.map((p) => [p.id, p]));
   const openSet = new Set(open.map((r) => r.projectId));
+  const submittedSet = new Set(submitted.map((r) => r.projectId));
   const base = baseUrl(req);
   const configured = emailConfigured();
 
@@ -128,6 +137,10 @@ export async function POST(req: Request) {
     }
     if (openSet.has(id)) {
       results.push({ id, title: p.title, emailed: false, status: "skipped-existing" });
+      continue;
+    }
+    if (submittedSet.has(id)) {
+      results.push({ id, title: p.title, emailed: false, status: "skipped-existing", note: "awaiting review" });
       continue;
     }
     const pm = (p.pm || "").trim();

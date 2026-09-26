@@ -29,6 +29,7 @@ interface QueueItem {
   projectId: string;
   projectTitle?: string;
   recipient: string | null;
+  emailedTo?: string | null;
   images: string[];        // newly uploaded (pending) keys
   projectImages: string[]; // keys already on the project
   submittedAt: string | null;
@@ -46,6 +47,8 @@ type Candidate = {
   emailedAt?: string | null;
   emailedTo?: string | null;
   openUrl: string | null;
+  /** A submitted request is waiting in Review uploads: don't ask this PM again. */
+  awaitingReview?: boolean;
   semester: string | null;
 };
 
@@ -58,6 +61,14 @@ type GenResult = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// The PM's new uploads first, then the project's existing images. Approve deletes
+// every un-kept upload, so preselecting old images first would silently throw the
+// submission away on a project that already has CAP images.
+function defaultSelection(r: QueueItem): string[] {
+  const newOnes = r.images ?? [];
+  return [...newOnes, ...(r.projectImages ?? []).filter((k) => !newOnes.includes(k))];
+}
 
 // Date + time, with a friendly relative age suffix.
 function formatSubmitted(iso: string | null): string {
@@ -241,12 +252,13 @@ function ReviewPanel({
       const { requests } = (await res.json()) as { requests: QueueItem[] };
       setItems(requests);
       onCount(requests.length);
-      const init: Record<string, Set<string>> = {};
-      for (const r of requests) {
-        const union = [...(r.projectImages ?? []), ...(r.images ?? [])];
-        init[r.token] = new Set(union.slice(0, CAP));
-      }
-      setSelected(init);
+      // Keep curated picks on cards still in the queue; approving or rejecting one
+      // card must not reset the others before an "Approve all".
+      setSelected((prev) =>
+        Object.fromEntries(
+          requests.map((r) => [r.token, prev[r.token] ?? new Set(defaultSelection(r).slice(0, CAP))])
+        )
+      );
     } catch (e) {
       setItems(null);
       setLoadError(e instanceof Error ? e.message : "Could not load the review queue.");
@@ -275,7 +287,7 @@ function ReviewPanel({
 
   // Select all (capped) / deselect all for one card's images.
   const selectAll = (r: QueueItem) => {
-    const union = [...(r.projectImages ?? []), ...(r.images ?? [])];
+    const union = defaultSelection(r);
     if (union.length > CAP) notify("err", `Selected the first ${CAP} — that's the max.`);
     setSelected((prev) => ({ ...prev, [r.token]: new Set(union.slice(0, CAP)) }));
   };
@@ -486,7 +498,7 @@ function ReviewPanel({
                 }}
               >
                 <span>
-                  From {r.recipient || "an unspecified sender"}
+                  From {r.emailedTo || r.recipient || "an unspecified sender"}
                   {r.submittedAt ? ` · submitted ${formatSubmitted(r.submittedAt)}` : ""}
                 </span>
                 <Link
@@ -700,10 +712,15 @@ function BulkPanel({ notify }: { notify: Notify }) {
   );
 
   const pending = useMemo(
-    () => visible.filter((c) => !linkFor(c)),
+    () => visible.filter((c) => !linkFor(c) && !c.awaitingReview),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [visible, gen]
   );
+
+  // Bulk-send eligibility. Reads `gen` too: a per-row send only records itself
+  // there, and c.emailedAt stays null until the next refresh.
+  const sendable = (c: Candidate) =>
+    !!c.pmEmail && !c.emailedAt && !gen[c.id]?.emailed && !c.awaitingReview;
 
   // Rows that currently have a usable link, for bulk outreach.
   const linked = useMemo(
@@ -791,7 +808,7 @@ function BulkPanel({ notify }: { notify: Notify }) {
     // Already-emailed rows are excluded, not re-sent. A second identical invite
     // to an external PM reads as a mistake on our side, and the per-row button
     // is still there for a deliberate re-send.
-    const ids = linked.filter((c) => c.pmEmail && !c.emailedAt).map((c) => c.id);
+    const ids = linked.filter(sendable).map((c) => c.id);
     // Captured before the request: linkFor() reads `gen`, and resolving inside
     // the state updater would read a half-applied version of it.
     const urlById = new Map(linked.map((c) => [c.id, linkFor(c)]));
@@ -856,8 +873,9 @@ function BulkPanel({ notify }: { notify: Notify }) {
   // file is not sendable, and a button promising to email 40 that silently
   // reaches 12 is worse than one that says 12.
   const emailablePms = useMemo(
-    () => linked.filter((c) => c.pmEmail && !c.emailedAt).length,
-    [linked]
+    () => linked.filter(sendable).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [linked, gen]
   );
 
   // Bulk outreach: title + URL, one per line.
@@ -1087,6 +1105,10 @@ function BulkPanel({ notify }: { notify: Notify }) {
                   >
                     <IconMail /> emailed
                   </span>
+                ) : c.awaitingReview ? (
+                  <Link href="/admin/uploads" className="badge b-draft">
+                    awaiting review
+                  </Link>
                 ) : g?.note ? (
                   <span className="badge b-draft">{g.note}</span>
                 ) : c.openUrl ? (
@@ -1162,7 +1184,7 @@ function BulkPanel({ notify }: { notify: Notify }) {
                         </button>
                       )}
                     </>
-                  ) : (
+                  ) : c.awaitingReview ? null : (
                     <button
                       className="btn-sm teal"
                       onClick={() => generate([c.id])}
