@@ -86,7 +86,10 @@ async function airtable(path, init = {}) {
     headers: { Authorization: `Bearer ${process.env.AIRTABLE_TOKEN}`, "Content-Type": "application/json", ...(init.headers || {}) },
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`Airtable ${init.method || "GET"} ${path.split("?")[0]} -> ${res.status} ${body?.error?.type || ""}`);
+  if (!res.ok) {
+    const type = typeof body?.error === "string" ? body.error : body?.error?.type || "";
+    throw new Error(`Airtable ${init.method || "GET"} ${path.split("?")[0]} -> ${res.status} ${type}`);
+  }
   return body;
 }
 
@@ -94,6 +97,10 @@ async function main() {
   const need = ["AIRTABLE_TOKEN", "AIRTABLE_BASE_ID", "DIGEST_TOKEN"].filter((k) => !process.env[k]);
   if (need.length) throw new Error(`missing env: ${need.join(", ")}`);
   const base = process.env.AIRTABLE_BASE_ID.trim();
+  // Shape only (length + first 3 chars) so a bad paste is diagnosable from a public log.
+  if (!/^app[A-Za-z0-9]{14}$/.test(base)) {
+    throw new Error(`AIRTABLE_BASE_ID should be "app" + 14 letters/digits; got ${base.length} chars starting "${base.slice(0, 3)}"`);
+  }
   const origin = (process.env.ATLAS_ORIGIN || "https://atlas.buspark.io").replace(/\/$/, "");
   const dry = !!process.env.DRY_RUN;
 
