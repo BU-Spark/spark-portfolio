@@ -5,7 +5,14 @@ import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import CDSGallery, { type CdsProject } from "@/components/CDSGallery";
 import { getProjects } from "@/lib/db";
-import { primaryDiscipline, primaryRun, latestTerm } from "@/lib/project";
+import {
+  primaryDiscipline,
+  primaryRun,
+  latestTerm,
+  projectDisciplines,
+  projectTerms,
+  projectProgramLabels,
+} from "@/lib/project";
 import { courseLabel } from "@/lib/data";
 import { cleanBlurb } from "@/lib/gdocs";
 
@@ -42,6 +49,9 @@ export default async function CDSPage() {
       topics: p.topics ?? [],
       term: latestTerm(p),
       program: courseLabel(primaryRun(p)?.course ?? ""),
+      disciplines: projectDisciplines(p),
+      terms: projectTerms(p),
+      programs: projectProgramLabels(p),
       partner: p.partner,
       partnerUrl: p.clientUrl ?? undefined,
       clientDesc: p.clientDesc ?? undefined,

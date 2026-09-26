@@ -1,6 +1,7 @@
 "use client";
 // Shared brand system, helpers, and filtering logic for the Spark! gallery.
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import Link from "next/link";
 import {
   primaryDiscipline,
   primaryCourseCode,
@@ -223,6 +224,37 @@ export function Thumb({
 // because the server gallery page calls it.
 export type { InitialFilters };
 
+// --- Back to gallery ---------------------------------------------------------
+// The gallery's last query string (filters/search/view), per tab, so the detail
+// page's "Back to gallery" link returns to the same view instead of a bare "/".
+// Storage can throw (private mode, blocked site data); then the link is just "/".
+const GALLERY_QS_KEY = "spark-gallery-qs";
+function rememberGalleryQuery(qs: string) {
+  try {
+    sessionStorage.setItem(GALLERY_QS_KEY, qs);
+  } catch {}
+}
+export function GalleryBackLink({
+  style,
+  children,
+}: {
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+}) {
+  const [href, setHref] = useState("/");
+  useEffect(() => {
+    try {
+      const qs = sessionStorage.getItem(GALLERY_QS_KEY);
+      if (qs) setHref(`/?${qs}`);
+    } catch {}
+  }, []);
+  return (
+    <Link href={href} style={style}>
+      {children}
+    </Link>
+  );
+}
+
 // --- Filtering hook ----------------------------------------------------------
 export function useFilters(
   projects: Project[],
@@ -295,7 +327,12 @@ export function useFilters(
           p.partner,
           p.clientType,
           ...(p.tech || []),
-          ...p.runs.flatMap((r) => [r.course, r.discipline, r.term]),
+          ...(p.topics ?? []),
+          // What the card shows: program names and disciplines (with the Misc
+          // fallback), not only the raw course code.
+          ...pd,
+          ...pp,
+          ...p.runs.flatMap((r) => [r.course, r.term]),
         ]
           .join(" ")
           .toLowerCase();
@@ -353,6 +390,7 @@ export function useFilters(
   useEffect(() => {
     if (firstSync.current) {
       firstSync.current = false;
+      rememberGalleryQuery(window.location.search.slice(1));
       return;
     }
     if (typeof window === "undefined") return;
@@ -370,6 +408,7 @@ export function useFilters(
     const qs = params.toString();
     const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
     window.history.replaceState(window.history.state, "", url);
+    rememberGalleryQuery(qs);
   }, [query, disciplines, programs, clientTypes, terms, topics, sort, view]);
 
   return {

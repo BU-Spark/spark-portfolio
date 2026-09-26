@@ -5,7 +5,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  SPARK_TERMS,
   courseLabel,
   formatCourseCodes,
   DEFAULT_GALLERY_SETTINGS,
@@ -278,14 +277,12 @@ export default function Gallery({
   projects,
   initialFilters = {},
   settings = DEFAULT_GALLERY_SETTINGS,
-  terms,
   studentExperiences = 0,
   viewerEmail = null,
 }: {
   projects: Project[];
   initialFilters?: InitialFilters;
   settings?: GallerySettings;
-  terms?: string[];
   studentExperiences?: number;
   /** Signed-in BU viewer's email, or null. Resolved server-side; see AuthStrip. */
   viewerEmail?: string | null;
@@ -316,6 +313,12 @@ export default function Gallery({
   // Program facet is grouped by friendly program NAME (one row per program, not
   // per course code — several codes map to one name). The label shows the codes,
   // e.g. "Spark! UX Practicum (DS 488/688)".
+  // Term options come from the same projects the counts do (plus any term already
+  // selected via the URL, so it can still be unticked), never from every row in
+  // the DB: a term only hidden/internal projects have would show as a dead 0.
+  const termOptions = Array.from(
+    new Set([...projects.flatMap((p) => projectTerms(p)), ...f.terms]),
+  ).sort((a, b) => termRank(a) - termRank(b));
   const programOptions = Array.from(
     new Set(projects.flatMap((p) => projectProgramLabels(p))),
   ).sort();
@@ -376,7 +379,7 @@ export default function Gallery({
     term: (
       <FacetGroup
         title="Term"
-        values={terms?.length ? terms : SPARK_TERMS}
+        values={termOptions}
         selected={f.terms}
         onToggle={f.toggleTerm}
         counts={counts.term}
@@ -821,6 +824,10 @@ export default function Gallery({
                 fontSize: 15,
               }}
             >
+              {projects.length === 0 ? (
+                "No projects published yet."
+              ) : (
+                <>
               No projects match your filters.{" "}
               <button
                 onClick={f.clearAll}
@@ -834,6 +841,8 @@ export default function Gallery({
               >
                 Reset
               </button>
+                </>
+              )}
             </div>
           ) : view === "list" ? (
             /* ---- LIST VIEW ---- */

@@ -1,9 +1,10 @@
 // Full-page project detail (replaces the slide-in drawer). Rendered by
 // app/projects/[slug]/page.tsx, which loads the project from the database and
-// passes it in. Server component; the only client-side bit (the masthead logo
-// that hides itself on a missing file) lives in <MastheadLogo>.
-import Link from "next/link";
+// passes it in. Server component; the client-side bits are <MastheadLogo>
+// (hides itself on a missing file) and <GalleryBackLink> (both gallery links
+// restore the visitor's saved filters, search and view).
 import MastheadLogo from "@/components/MastheadLogo";
+import { GalleryBackLink } from "@/lib/shared";
 import ProjectGallery from "@/components/ProjectGallery";
 import { courseLabel } from "@/lib/data";
 import { disciplineColor } from "@/lib/colors";
@@ -11,6 +12,7 @@ import {
   primaryDiscipline,
   projectDisciplines,
   projectTerms,
+  runDiscipline,
   runsByRecency,
   termRank,
 } from "@/lib/project";
@@ -185,7 +187,7 @@ export default function ProjectView({ project }: { project: Project }) {
   // project that appeared twice under the same course/term shows one row.
   const seen = new Set<string>();
   const runs = runsByRecency(project).filter((r) => {
-    const key = [r.term, r.course, r.discipline]
+    const key = [r.term, r.course, runDiscipline(r)]
       .map((v) => v.trim().toLowerCase())
       .join("|");
     if (seen.has(key)) return false;
@@ -206,8 +208,7 @@ export default function ProjectView({ project }: { project: Project }) {
         className="spark-detail"
         style={{ maxWidth: 760, margin: "0 auto", padding: "28px 40px 80px" }}
       >
-        <Link
-          href="/"
+        <GalleryBackLink
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -221,7 +222,7 @@ export default function ProjectView({ project }: { project: Project }) {
           }}
         >
           ← Back to gallery
-        </Link>
+        </GalleryBackLink>
 
         {/* Image gallery (no captions). Only real images get a tile, and each
             one opens full size — see components/ProjectGallery. */}
@@ -400,10 +401,10 @@ export default function ProjectView({ project }: { project: Project }) {
                     fontSize: 10.5,
                     letterSpacing: "0.06em",
                     textTransform: "uppercase",
-                    color: disciplineColor(r.discipline),
+                    color: disciplineColor(runDiscipline(r)),
                   }}
                 >
-                  {r.discipline}
+                  {runDiscipline(r)}
                 </span>
               </div>
             ))}
@@ -629,8 +630,7 @@ function Masthead() {
           margin: "0 auto",
         }}
       >
-        <Link
-          href="/"
+        <GalleryBackLink
           style={{
             display: "flex",
             alignItems: "center",
@@ -658,7 +658,7 @@ function Masthead() {
             <span style={{ width: 1, height: 16, background: "#d4d4d4" }} />
             <span style={{ fontSize: 14, color: "#6a6f74" }}>Project Gallery</span>
           </div>
-        </Link>
+        </GalleryBackLink>
       </div>
     </header>
   );

@@ -2400,13 +2400,20 @@ export const getDistinctTerms = unstable_cache(
 
 // Total student "experiences" = one contributors row per student per project-run
 // (a student on two projects counts twice). Public-safe: a bare count, no PII.
-// Falls back to 0 if the table doesn't exist yet.
+// Counts only the projects the gallery beside it shows: the caller's visibility
+// tier (public, or BU_VISIBLE when signed in) on the Spark surface, so the hero's
+// student and project stats describe the same population. The argument is part
+// of the cache key. Falls back to 0 if the table doesn't exist yet.
 export const countStudentExperiences = unstable_cache(
-  async (): Promise<number> => {
+  async (visibilities: readonly string[] = ["public"]): Promise<number> => {
     try {
       await ensureContributorsTable();
       const rows = await query<{ n: string }>(
-        `SELECT COUNT(*)::text AS n FROM contributors`
+        `SELECT COUNT(*)::text AS n
+           FROM contributors c JOIN projects p ON p.id = c.project_id
+          WHERE p.visibility = ANY($1)
+            AND 'spark' = ANY(COALESCE(p.surfaces, ARRAY['spark']))`,
+        [visibilities as string[]]
       );
       return Number(rows[0]?.n ?? 0);
     } catch {
