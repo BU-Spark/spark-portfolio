@@ -78,6 +78,45 @@ describe("extractPdBlurb", () => {
     expect(extractPdBlurb(doc)).toBe("A tidy blurb.");
   });
 
+  it("stops at 'Client Note:' and the phase plan (bu-met-autograding)", () => {
+    const narrative = [
+      "In Fall 2025, the Spark! team focused on improving grading consistency for text-based short answer assessments using Azure AI Foundry. Through prompt iteration and testing with Mike’s teaching team, the AI-generated grades and feedback became acceptable by the end of the semester, and the current prompt/model configuration does not require major changes for text-only assessment grading at this time.",
+      "However, the team also identified a key limitation in Azure AI Foundry’s multimodal capabilities. While Azure can extract text from PDFs and slides, including text embedded in images when preserved in the file, it cannot reliably interpret or summarize images that do not contain text. Since CS 581 includes course materials and assignment submissions that are often Excel-based and diagram/image-based, this limitation affects the feasibility of expanding the AI grading workflow beyond text-only assessments.",
+      "This semester, the project will continue the grading pilot while focusing on selecting and implementing an AI platform that can reliably handle multimodal course materials and assignment submissions (PDFs with images, Excel files, and image/diagram submissions), with API access as a core requirement.",
+    ].join("\n");
+    const planning = [
+      "Client Note: We want to parse Blackboard data (student submissions, lecture material, previous semester student submissions, etc.) in a way that a RAG system can read.",
+      "This project can be divided into 3 phases:",
+      "Phase 1: Research and Tool Comparison (Multimodal Benchmarking)",
+      "The team will evaluate multiple AI platforms/tools.",
+      "• One Excel file (example student assignment submission)",
+      "Phase 2: Environment Setup and Configuration",
+      "   • set up a local testing environment using that platform’s API",
+      "Phase 3: Pilot Support and Iteration (Live Course Data)",
+      "Stretch / add-on within Phase 3:",
+      " Develop clearer evaluation metrics for grading quality/consistency.",
+    ].join("\n");
+    const doc = `Project Description:\n${narrative}\n${planning}\nIdeal Output & Deliverables\nx`;
+    expect(extractPdBlurb(doc)).toBe(narrative);
+    // Same fix repairs an already-stored leaked blurb.
+    expect(recleanBlurb(`${narrative}\n${planning}`)).toBe(narrative);
+  });
+
+  it("stops at other planning sections and strips comment anchors", () => {
+    const doc =
+      "Project Description:\nThe summary[a] sentence.[b]\n• Things to Avoid\n• scope creep\nIdeal Output\nx";
+    expect(extractPdBlurb(doc)).toBe("The summary sentence.");
+    expect(
+      extractPdBlurb("Description\nA blurb.\nPreferred Client Meeting Time: Tue 3pm\nIdeal Output\nx")
+    ).toBe("A blurb.");
+  });
+
+  it("does not cut on 'phase' or 'stretch' used mid-prose", () => {
+    const doc =
+      "Project Description:\nIn phase 1: we stretch goals.\nIdeal Output\nx";
+    expect(extractPdBlurb(doc)).toBe("In phase 1: we stretch goals.");
+  });
+
   it("does not cut on 'overview' or 'next steps' used mid-prose", () => {
     const doc =
       "Project Description:\nThis overview covers next steps for the team.\nIdeal Output & Deliverables\nx";
