@@ -5,6 +5,7 @@
 import { revalidateTag } from "next/cache";
 import { requireProjects } from "@/lib/actor";
 import { mergeProjects, type MergeResolution } from "@/lib/db";
+import { VISIBILITIES, type Visibility } from "@/lib/data";
 
 export async function POST(req: Request) {
 
@@ -52,6 +53,9 @@ export async function POST(req: Request) {
     techNote: nstr("techNote"),
     featured: bool("featured"),
     published: bool("published"),
+    visibility: (VISIBILITIES as readonly string[]).includes(raw.visibility as string)
+      ? (raw.visibility as Visibility)
+      : undefined,
   };
 
   const result = await mergeProjects(survivorId, absorbedId, resolution, g.actor);

@@ -329,9 +329,10 @@ export default function ManageProjectsPage() {
   // off the gallery is not the same as declaring it unfinished, and silently
   // demoting to draft would lose that distinction. Send it back to draft from the
   // edit page, which has the full three-way control.
-  const toggleGallery = async (p: Project) => {
+  // `to` forces a target; without it the toggle flips public / internal.
+  const toggleGallery = async (p: Project, to?: "internal" | "public") => {
     const isPublic = (p.visibility ?? "hidden") === "public";
-    const next = isPublic ? "internal" : "public";
+    const next = to ?? (isPublic ? "internal" : "public");
     setBusy(p.id);
     const res = await fetch(`/api/projects/${p.id}`, {
       method: "PATCH",
@@ -346,19 +347,27 @@ export default function ManageProjectsPage() {
       setBusy(null);
       return;
     }
-    notify("ok", isPublic ? `"${p.title}" removed from the gallery.` : `"${p.title}" is now live.`);
+    notify(
+      "ok",
+      next === "public"
+        ? `"${p.title}" is now live.`
+        : isPublic
+          ? `"${p.title}" removed from the gallery.`
+          : `"${p.title}" marked ready — not on the public gallery.`
+    );
     await refresh();
     setBusy(null);
   };
 
 
-  // "Show" (publish) respects the publish gate; route to togglePublish which
-  // surfaces a 422. "Hide" on a published project asks for confirmation first.
+  // Keyed on visibility, not the legacy `published` boolean: that is true for
+  // Ready (internal/restricted) too, so it made "Hide" publish a Ready project.
+  // "Add" respects the publish gate (surfaces a 422); "Hide" confirms first.
   const onToggleClick = (p: Project) => {
-    if (p.published === false) {
-      toggleGallery(p);
-    } else {
+    if (p.visibility === "public") {
       setHideTarget(p);
+    } else {
+      toggleGallery(p, "public");
     }
   };
 
@@ -503,7 +512,7 @@ export default function ManageProjectsPage() {
     const p = hideTarget;
     setHideTarget(null);
     if (!p) return;
-    await toggleGallery(p);
+    await toggleGallery(p, "internal");
   };
 
   // Close the overflow menu on any outside click / Escape.
@@ -729,8 +738,8 @@ export default function ManageProjectsPage() {
     notify(
       failed ? "err" : "ok",
       failed
-        ? `${succeeded} published, ${failed} failed.`
-        : `${succeeded} draft${succeeded !== 1 ? "s" : ""} published.`
+        ? `${succeeded} marked ready, ${failed} failed.`
+        : `${succeeded} draft${succeeded !== 1 ? "s" : ""} marked ready — not on the public gallery.`
     );
     await refresh();
   };
@@ -1176,7 +1185,7 @@ export default function ManageProjectsPage() {
                     )}
                     <button
                       className="hidebtn"
-                      onClick={() => toggleGallery(p)}
+                      onClick={() => toggleGallery(p, "internal")}
                       disabled={busy === p.id || !mine(p)}
                       title={mine(p) ? undefined : lockedTitle(p)}
                       style={{
@@ -1188,7 +1197,7 @@ export default function ManageProjectsPage() {
                         cursor: mine(p) ? "pointer" : "not-allowed",
                       }}
                     >
-                      {busy === p.id ? "…" : "Publish"}
+                      {busy === p.id ? "…" : "Mark ready"}
                     </button>
                     {mine(p) ? (
                       <Link href={`/admin/edit/${p.id}`} className="editlink" style={{ fontSize: 11 }}>
@@ -1351,6 +1360,7 @@ export default function ManageProjectsPage() {
               const team = missingTeam(p);
               const review = reviewFlags(p);
               const isDraft = p.published === false;
+              const onGallery = p.visibility === "public";
               const blockers = isDraft ? publishBlockers(p) : [];
               const dotColor = !isDraft
                 ? "transparent"
@@ -1553,10 +1563,10 @@ export default function ManageProjectsPage() {
                       className="rec-tool"
                       onClick={() => onToggleClick(p)}
                       disabled={rowBusy}
-                      title={isDraft ? "Publish" : "Hide from gallery"}
-                      aria-label={isDraft ? "Publish" : "Hide from gallery"}
+                      title={onGallery ? "Hide from gallery" : "Add to public gallery"}
+                      aria-label={onGallery ? "Hide from gallery" : "Add to public gallery"}
                     >
-                      {isDraft ? (
+                      {!onGallery ? (
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                           <path d="M9.9 5A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a13 13 0 0 1-2.3 3M6.6 6.6A13 13 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 4.5-1.1" />
                           <path d="M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2" />
@@ -1606,7 +1616,7 @@ export default function ManageProjectsPage() {
                               onToggleClick(p);
                             }}
                           >
-                            {isDraft ? (
+                            {!onGallery ? (
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
                                 <circle cx="12" cy="12" r="3" />
@@ -1617,7 +1627,7 @@ export default function ManageProjectsPage() {
                                 <path d="M3 3l18 18M9.9 9.9a3 3 0 0 0 4.2 4.2" />
                               </svg>
                             )}
-                            {isDraft ? "Publish" : "Hide from gallery"}
+                            {onGallery ? "Hide from gallery" : "Add to public gallery"}
                           </button>
                           <div className="mi-sep" />
                           <button
