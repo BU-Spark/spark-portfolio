@@ -1,0 +1,73 @@
+# Apply reviewers' answers on Atlas `data-conflict` issues to the PRODUCTION database.
+#
+# A reviewer comments on an import issue ("keep Relay Fund as the title"); this asks
+# Claude what was decided, validates it in code (scripts/issue-bot/answer.mjs: column
+# allowlist, never visibility/status/owner_org), writes it in one transaction, posts
+# the old values as a backup in the reply, ticks the resolved checklist lines and
+# closes the issue when none are left.
+#
+# SETUP (repo Settings -> Secrets and variables -> Actions):
+#   secret   ANTHROPIC_API_KEY              Claude API key
+#   secret   ATLAS_ISSUE_BOT_DATABASE_URL   production Postgres URL (needs SELECT/UPDATE on projects)
+#   variable ISSUE_BOT_DRY_RUN              unset or anything but 0 = dry run (reads, replies
+#                                           "Dry run, nothing written:", never UPDATEs/ticks/closes).
+#                                           Set to 0 to go live.
+#   variable ISSUE_BOT_MODEL                optional, default claude-opus-5-5
+#
+# WHO: only the numeric GitHub user ids below (kaylinvonbergen, UgaTheDev). Ids, not
+# logins: a login can be renamed and re-registered, an id cannot. Bots never trigger it.
+#
+# SECURITY: issue and comment text is untrusted. Nothing from github.event.* is
+# interpolated into a run: script; the only values passed are numeric ids via env,
+# and the script re-reads everything from the API. Actions logs are public: the
+# script logs counts and column names only.
+name: issue answer bot
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # One run per issue at a time, so two quick comments can't race on the same row.
+  group: issue-answer-bot-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  answer:
+    if: >-
+      github.event.issue.pull_request == null &&
+      contains(github.event.issue.labels.*.name, 'data-conflict') &&
+      github.event.comment.user.type != 'Bot' &&
+      (github.event.comment.user.id == 126300160 || github.event.comment.user.id == 221450008)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Needs no secrets: if the validation logic is broken, fail before touching prod.
+      - name: Verify the bot logic
+        run: node scripts/issue-bot/answer.mjs --self-check
+
+      - name: Install pg (lockfile-pinned)
+        working-directory: scripts/issue-bot
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Answer the comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          DATABASE_URL: ${{ secrets.ATLAS_ISSUE_BOT_DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ISSUE_BOT_MODEL: ${{ vars.ISSUE_BOT_MODEL }}
+          ISSUE_BOT_DRY_RUN: ${{ vars.ISSUE_BOT_DRY_RUN || '1' }}
+        run: node scripts/issue-bot/answer.mjs
