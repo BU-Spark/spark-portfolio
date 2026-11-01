@@ -89,15 +89,15 @@ export default function AdminRail() {
       // a home, which is how this rail reached eleven items.
       { href: "/admin/uploads", label: "Uploads", icon: "media" },
     ]},
-    // Hidden rather than disabled for non-supers: both pages are super-only at the
-    // API, so they'd be dead ends. "Import CSV" stays visible for everyone — it's
-    // org-scoped now, not super-only.
-    ...(actor?.isSuper
-      ? [{ title: "Admin", items: [
-          { href: "/admin/users", label: "Admins", icon: "admins" as IconName },
-          { href: "/admin/settings", label: "Settings", icon: "settings" as IconName },
-        ]}]
-      : []),
+    // Admins is for everyone: any admin may add a scoped admin to their own team
+    // (canAddAdmin). Settings is hidden rather than disabled for non-supers — it's
+    // super-only at the API, so it would be a dead end.
+    { title: "Admin", items: [
+      { href: "/admin/users", label: "Admins", icon: "admins" as IconName },
+      ...(actor?.isSuper
+        ? [{ href: "/admin/settings", label: "Settings", icon: "settings" as IconName }]
+        : []),
+    ]},
   ];
 
   const initials = (actor?.email || "?")

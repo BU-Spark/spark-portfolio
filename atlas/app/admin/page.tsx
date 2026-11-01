@@ -19,8 +19,9 @@ const PROJECTS_CACHE_KEY = "spark:admin:projects:v1";
 // Every admin destination — rendered as a flat, always-visible grid on the
 // dashboard so nothing (e.g. "Manage admins") is buried only inside a dropdown.
 // `superOnly` entries are filtered out for scoped admins, matching AdminRail:
-// /admin/settings and /admin/users are requireSuper at the API, so leaving them
-// linked here would hand a CDS or Spark admin a pair of guaranteed dead ends.
+// /admin/settings is requireSuper at the API, so leaving it linked here would hand
+// a CDS or Spark admin a dead end. (/admin/users is open to every admin for adding
+// to their own team; removal there stays super-only.)
 
 export default function AdminDashboardPage() {
   const actor = useActor();

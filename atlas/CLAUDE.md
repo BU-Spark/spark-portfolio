@@ -80,7 +80,10 @@ Going sequential should be a deliberate choice, not the default.
   resolution and the route guards live in `lib/actor.ts`. Routes use
   `requireAdmin` / `requireSuper` / `requireProject(s)` — never a bare `auth()`.
 - `is_super` is granted by **SQL only**. No API accepts the field, so a mistake
-  yields a scoped admin, never a super admin.
+  yields a scoped admin, never a super admin. `POST /api/users` refuses a request
+  that asks for it (403) rather than ignoring it.
+- **Any admin may add an admin, but only into their own org** (`canAddAdmin`);
+  supers add into any org. Removing admins stays super-only (`canManageUsers`).
 - Reassigning a project to CDS removes it from the Spark PD sync (the importer
   pre-filters candidates by org and the Apps Script runs as `IMPORT_ORG=spark`).
   That's intended, but it looks like a bug if you don't expect it.

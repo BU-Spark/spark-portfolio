@@ -9,7 +9,7 @@
 // The model, in two sentences: every admin belongs to exactly one org and may
 // only edit projects owned by that org; a small number of explicitly-flagged
 // super admins may edit anything and are the only ones who can move a project
-// between orgs. `is_super` is granted by SQL alone — no API accepts the field —
+// between orgs or remove admins (any admin may add one to their own org). `is_super` is granted by SQL alone — no API accepts the field —
 // so an admin created by a path that forgets to tag them is a scoped Spark
 // admin, never a super admin.
 
@@ -63,9 +63,25 @@ export function canSetOwnerOrg(actor: Actor): boolean {
   return actor.isSuper;
 }
 
-/** Granting/revoking admin is super-only. */
+/** Removing admins (and anything touching another admin's row) is super-only.
+ *  Adding a scoped admin is not — see canAddAdmin. */
 export function canManageUsers(actor: Actor): boolean {
   return actor.isSuper;
+}
+
+/**
+ * May this actor add a new admin into `target.org`?
+ *
+ * - Nobody mints a super admin through the app: `is_super` is SQL-only, so a
+ *   request asking for it is refused outright, even from a super admin.
+ * - A super admin may add into any known org.
+ * - A scoped admin may add only into their OWN org, so the worst they can do is
+ *   grow their own team — never grant authority they don't already hold.
+ */
+export function canAddAdmin(actor: Actor, target: { org: string; isSuper?: boolean }): boolean {
+  if (target.isSuper) return false;
+  if (!isKnownOrg(target.org)) return false;
+  return actor.isSuper || actor.org === target.org;
 }
 
 /** Editing the global gallery vocabulary (shared by both orgs) is super-only. */

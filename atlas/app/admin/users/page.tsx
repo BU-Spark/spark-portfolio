@@ -7,7 +7,7 @@
 // field, and API call is preserved.
 import { useCallback, useEffect, useState } from "react";
 import PageHeader from "@/components/admin/PageHeader";
-import { orgLabel } from "@/components/admin/ActorContext";
+import { orgLabel, useActor } from "@/components/admin/ActorContext";
 import { useToast } from "@/components/admin/useToast";
 
 interface AdminUser {
@@ -40,6 +40,12 @@ export default function UsersPage() {
   // admins are promoted with SQL, so this form can only ever create a scoped
   // admin, which is what makes a mistake here harmless.
   const [org, setOrg] = useState("");
+  // Any admin can add; only a super picks the team or removes anyone (canAddAdmin
+  // / canManageUsers in lib/authz.ts). A scoped admin's team is locked to their
+  // own. Presentation only — POST/DELETE /api/users enforce the same rules.
+  const actor = useActor();
+  const isSuper = !!actor?.isSuper;
+  const teamOrg = isSuper ? org : actor?.org ?? "";
   const [busy, setBusy] = useState(false);
   // Current admin's email for the "you"/self-lockout guard. Sourced from the
   // next-auth session endpoint (client-only) rather than useSession(), since the
@@ -68,7 +74,7 @@ export default function UsersPage() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, org }),
+      body: JSON.stringify({ email, org: teamOrg }),
     });
     setBusy(false);
     const data = await res.json().catch(() => ({}));
@@ -110,6 +116,12 @@ export default function UsersPage() {
           sign in immediately — no password to set or send. They will only be able
           to create and edit <b>their own team&apos;s</b> projects; cross-team work
           needs a super admin, which is granted directly in the database.
+          {!isSuper && (
+            <>
+              {" "}You can add admins to your own team; removing admins is for
+              super admins.
+            </>
+          )}
         </p>
 
         {/* Add admin */}
@@ -139,8 +151,10 @@ export default function UsersPage() {
               <select
                 className="fld"
                 id="neworg"
-                value={org}
+                value={teamOrg}
                 onChange={(e) => setOrg(e.target.value)}
+                disabled={!isSuper}
+                title={isSuper ? undefined : "You can add admins to your own team only"}
                 required
               >
                 <option value="">Choose a team…</option>
@@ -150,7 +164,7 @@ export default function UsersPage() {
             </div>
             <button
               type="submit"
-              disabled={busy || !org}
+              disabled={busy || !teamOrg}
               className="btn btn-teal"
               style={{ fontSize: 14, padding: "11px 20px" }}
             >
@@ -186,6 +200,11 @@ export default function UsersPage() {
           ) : (
             users.map((u, i) => {
               const isMe = !!me && u.email.toLowerCase() === me.toLowerCase();
+              const noRemove = isMe
+                ? "You can't remove your own access"
+                : !isSuper
+                  ? "Only a super admin can remove admins"
+                  : null;
               return (
                 <div
                   key={u.id}
@@ -298,17 +317,17 @@ export default function UsersPage() {
                   {/* Remove */}
                   <button
                     onClick={() => remove(u)}
-                    disabled={isMe}
-                    title={isMe ? "You can't remove your own access" : undefined}
+                    disabled={!!noRemove}
+                    title={noRemove ?? undefined}
                     style={{
                       fontFamily: "var(--mono)",
                       fontSize: "12.5px",
-                      color: isMe ? "var(--ink-4)" : "var(--rose)",
-                      border: `1px solid ${isMe ? "var(--line)" : "var(--rose-line)"}`,
-                      background: isMe ? "var(--bg2)" : "var(--panel)",
+                      color: noRemove ? "var(--ink-4)" : "var(--rose)",
+                      border: `1px solid ${noRemove ? "var(--line)" : "var(--rose-line)"}`,
+                      background: noRemove ? "var(--bg2)" : "var(--panel)",
                       borderRadius: 8,
                       padding: "7px 13px",
-                      cursor: isMe ? "not-allowed" : "pointer",
+                      cursor: noRemove ? "not-allowed" : "pointer",
                       flexShrink: 0,
                       transition: "all .15s",
                     }}
