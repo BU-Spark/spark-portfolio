@@ -4,6 +4,7 @@ import {
   canMerge,
   canSetOwnerOrg,
   canManageUsers,
+  canAddAdmin,
   canEditVocab,
   type Actor,
 } from "./authz";
@@ -81,5 +82,35 @@ describe("super-only capabilities", () => {
       expect(fn(untagged)).toBe(false);
       expect(fn(superAdmin)).toBe(true);
     }
+  });
+});
+
+describe("canAddAdmin", () => {
+  it("lets a scoped admin add a scoped admin to their own org", () => {
+    expect(canAddAdmin(spark, { org: "spark" })).toBe(true);
+    expect(canAddAdmin(cds, { org: "cds" })).toBe(true);
+  });
+
+  it("blocks a scoped admin from adding into the other org", () => {
+    expect(canAddAdmin(spark, { org: "cds" })).toBe(false);
+    expect(canAddAdmin(cds, { org: "spark" })).toBe(false);
+  });
+
+  it("never lets anyone grant super through the add path", () => {
+    for (const a of [spark, cds, superAdmin]) {
+      expect(canAddAdmin(a, { org: a.org, isSuper: true })).toBe(false);
+    }
+  });
+
+  it("lets a super admin add into any known org", () => {
+    expect(canAddAdmin(superAdmin, { org: "spark" })).toBe(true);
+    expect(canAddAdmin(superAdmin, { org: "cds" })).toBe(true);
+  });
+
+  it("fails closed on unknown orgs and untagged actors", () => {
+    expect(canAddAdmin(superAdmin, { org: "some-future-org" })).toBe(false);
+    expect(canAddAdmin(untagged, { org: "" })).toBe(false);
+    expect(canAddAdmin(untagged, { org: "spark" })).toBe(false);
+    expect(canAddAdmin({ ...untagged, org: "sparkk" }, { org: "sparkk" })).toBe(false);
   });
 });
