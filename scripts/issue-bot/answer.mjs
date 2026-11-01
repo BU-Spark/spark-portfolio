@@ -35,7 +35,7 @@ const BOT_MARK = "<!-- atlas-issue-bot -->";
 // ---------- pure logic (covered by --self-check) ----------
 
 export function extractProjectId(body) {
-  const m = String(body || "").match(/<!--\s*atlas-import:([A-Za-z0-9][A-Za-z0-9_.-]*)\s*-->/);
+  const m = String(body || "").match(/<!--\s*atlas-import:([A-Za-z0-9][A-Za-z0-9_.-]*)(?::[a-z0-9-]+)?\s*-->/);
   return m ? m[1] : null;
 }
 
@@ -114,6 +114,7 @@ export function show(col, v) {
 // ---------- self-check ----------
 
 function selfCheck() {
+  assert.equal(extractProjectId("<!-- atlas-import:als-resource-app:fall-2023 -->"), "als-resource-app", "term-suffixed marker");
   assert.equal(extractProjectId("<!-- atlas-import:relay-fund -->\n**Status"), "relay-fund");
   assert.equal(extractProjectId("<!--atlas-import:bpda-brazilian-community-census-analysis-->"), "bpda-brazilian-community-census-analysis");
   assert.equal(extractProjectId("no marker here"), null);
