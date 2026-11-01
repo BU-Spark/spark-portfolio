@@ -1,0 +1,8 @@
+{
+  "name": "atlas-issue-bot",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pg": "8.21.0"
+  }
+}
