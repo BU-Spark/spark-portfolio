@@ -259,6 +259,7 @@ async function askModel({ issue, comments, triggerId, row }) {
   });
   if (!res.ok) throw new Error(`Anthropic API -> ${res.status}`);
   const msg = await res.json();
+  console.log(`usage model=${msg.model} input=${msg.usage?.input_tokens} output=${msg.usage?.output_tokens}`);
   if (msg.stop_reason !== "end_turn") return null; // refusal / max_tokens: treated as not understood
   return parseDecision((msg.content || []).filter((b) => b.type === "text").map((b) => b.text).join(""));
 }
