@@ -42,13 +42,11 @@ export function extractProjectId(body) {
 // Returns { ok: [{column, value, checkbox, reason}], errors: [string] }. The caller
 // writes nothing unless errors is empty.
 export function validateChanges(changes) {
-  const ok = [], errors = [], seen = new Set();
+  const ok = [], errors = [], seen = new Map();
   if (!Array.isArray(changes)) return { ok, errors: ["changes is not a list"] };
   for (const c of changes) {
     const col = c && typeof c.column === "string" ? c.column : "";
     if (!COLUMNS.includes(col)) { errors.push(`\`${col.slice(0, 40) || "?"}\` is not a column this bot may change`); continue; }
-    if (seen.has(col)) { errors.push(`\`${col}\` appears twice`); continue; }
-    seen.add(col);
     let v = c.value;
     if (ARRAY_COLS.has(col)) {
       if (!Array.isArray(v) || v.some((x) => typeof x !== "string" || !x.trim() || x.length > 100)) {
@@ -65,7 +63,16 @@ export function validateChanges(changes) {
       }
       if (URL_COLS.has(col) && v !== null && !isHttpUrl(v)) { errors.push(`\`${col}\` must be an http(s) URL`); continue; }
     }
-    ok.push({ column: col, value: v, checkbox: typeof c.checkbox === "string" ? c.checkbox : "", reason: String(c.reason || "") });
+    const box = typeof c.checkbox === "string" ? c.checkbox : "";
+    // One answer can settle several checklist lines for the same column: same value ticks them all.
+    const prev = seen.get(col);
+    if (prev) {
+      if (JSON.stringify(prev.value) !== JSON.stringify(v)) errors.push(`\`${col}\` was given two different values`);
+      else prev.also.push(box);
+      continue;
+    }
+    const entry = { column: col, value: v, checkbox: box, also: [], reason: String(c.reason || "") };
+    seen.set(col, entry); ok.push(entry);
   }
   return { ok, errors };
 }
@@ -125,6 +132,11 @@ function selfCheck() {
     const r = validateChanges([{ column: col, value: "public" }]);
     assert.equal(r.ok.length, 0, col); assert.equal(r.errors.length, 1, col);
   }
+  // same column twice with the same value is one write that ticks both lines; different values is an error
+  let d = validateChanges([{ column: "title", value: "A", checkbox: "x" }, { column: "title", value: " A ", checkbox: "y" }]);
+  assert.deepEqual(d.errors, []); assert.equal(d.ok.length, 1); assert.deepEqual(d.ok[0].also, ["y"]);
+  d = validateChanges([{ column: "title", value: "A", checkbox: "x" }, { column: "title", value: "B", checkbox: "y" }]);
+  assert.equal(d.errors.length, 1);
   // one bad change poisons the batch: caller sees errors and writes nothing
   assert.equal(validateChanges([{ column: "title", value: "Relay Fund" }, { column: "visibility", value: "public" }]).errors.length, 1);
   assert.equal(validateChanges([{ column: "client_type", value: "Nonprofit" }]).ok.length, 1);
@@ -336,7 +348,7 @@ async function main() {
 
     // Tick resolved lines in the body and in any human comment that carries the
     // checklist (later runs post theirs as comments, see #214), then close if done.
-    const boxes = ok.map((c) => c.checkbox);
+    const boxes = ok.flatMap((c) => [c.checkbox, ...c.also]);
     const b = tickLines(issue.body, boxes);
     if (b.ticked.length) await gh(`/issues/${n}`, { method: "PATCH", body: JSON.stringify({ body: b.text }) });
     let tickedCount = b.ticked.length;
