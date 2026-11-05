@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 const send = vi.fn();
 vi.mock("resend", () => ({ Resend: class { batch = { send }; } }));
 
-const { sendUploadInvites } = await import("./email");
+const { sendUploadInvites, recordSends } = await import("./email");
 const invite = (i: number) => ({ to: `pm${i}@bu.edu`, url: `https://x/${i}`, projectTitle: `P${i}`, expiresAt: "2026-12-01" });
 
 describe("sendUploadInvites", () => {
@@ -31,5 +31,35 @@ describe("sendUploadInvites", () => {
     delete process.env.RESEND_API_KEY;
     expect(await sendUploadInvites([invite(1)])).toEqual([{ sent: false }]);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("recordSends", () => {
+  const q = (i: number) => ({ id: `p${i}`, title: `P${i}`, to: `pm${i}@bu.edu`, token: `t${i}` });
+
+  it("keeps sent:true and flags the row when the send record fails to save", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mark = vi.fn(async (token: string) => {
+      if (token === "t1") throw new Error("db down");
+    });
+    const r = await recordSends(
+      [q(0), q(1), q(2)],
+      [{ sent: true }, { sent: true }, { sent: false, error: "bounced" }],
+      mark
+    );
+    expect(mark.mock.calls.map((c) => c[0])).toEqual(["t0", "t1"]);
+    expect(r[0]).toMatchObject({ id: "p0", sent: true, reason: undefined });
+    expect(r[0].recordFailed).toBeUndefined();
+    expect(r[1]).toMatchObject({ id: "p1", sent: true, recordFailed: true });
+    // Raw DB error is logged server-side, never returned to the client.
+    expect(r[1].reason).toBe("sent, but the send record failed to save — do not resend");
+    // The token is the upload link's only credential: log its tail, never all of it.
+    expect(err).toHaveBeenCalledWith("upload invite sent but not recorded", {
+      projectId: "p1",
+      tokenTail: "t1",
+      err: "db down",
+    });
+    err.mockRestore();
+    expect(r[2]).toMatchObject({ id: "p2", sent: false, reason: "bounced" });
   });
 });

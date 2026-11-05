@@ -9,6 +9,7 @@ import { revalidateTag } from "next/cache";
 import { requireAdmin, requireProject, requireSuper } from "@/lib/actor";
 import {
   getProjectAdmin,
+  getProjectOrgs,
   removeProject,
   setProjectOwnerOrg,
   updateProject,
@@ -45,6 +46,11 @@ export async function PATCH(
   const { id } = await params;
   const g = await requireProject(id);
   if (!g.ok) return g.res;
+  // requireProject skips the lookup for supers, and updateProject is a bare
+  // UPDATE — so without this a super's PATCH on a missing id answered ok.
+  if (g.actor.isSuper && !(await getProjectOrgs([id])).has(id)) {
+    return Response.json({ error: "Project not found" }, { status: 404 });
+  }
 
   let body: Record<string, unknown>;
   try {

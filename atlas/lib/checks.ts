@@ -126,6 +126,27 @@ export function checkDatasets(datasets: Project["datasets"]): Finding[] {
   return out;
 }
 
+export const isGone = (status: number) => status === 404 || status === 410;
+
+/**
+ * Verdict on a dataset link from its final HTTP status (the caller retries a HEAD
+ * 404/410 with GET first). 404/410 are "dead", except on GitHub / Hugging Face,
+ * where a private repo 404s to anonymous requests — that's "private", a warning.
+ * Anything else under 500 is alive: many hosts reject HEAD (405) or gate access
+ * (401/403) while the link works in a browser. 5xx counts as dead.
+ */
+export function linkVerdict(status: number, url: string): "alive" | "dead" | "private" {
+  if (isGone(status)) {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {}
+    const privateCapable = ["github.com", "huggingface.co"].some((h) => host === h || host.endsWith(`.${h}`));
+    return privateCapable ? "private" : "dead";
+  }
+  return status < 500 ? "alive" : "dead";
+}
+
 /** A run needs a term and a course to be a real run. */
 export function checkRuns(runs: Run[]): Finding[] {
   const real = (runs ?? []).filter((r) => (r.term ?? "").trim() && (r.course ?? "").trim());

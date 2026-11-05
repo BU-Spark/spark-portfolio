@@ -98,6 +98,11 @@ export async function POST(req: Request) {
     ? (body.projectIds as unknown[]).map(String).filter(Boolean)
     : [];
   if (!ids.length) return Response.json({ error: "No projectIds provided." }, { status: 400 });
+  // Each id is a DB write; an accidental huge payload should fail loudly, not mint
+  // thousands of links. Above the whole backlog, so the UI never hits it.
+  if (ids.length > 500) {
+    return Response.json({ error: "Too many projects in one request" }, { status: 413 });
+  }
 
   // All-or-nothing on the batch rather than per-item "forbidden" results: because
   // GET above is already org-filtered, a mixed batch can only come from a

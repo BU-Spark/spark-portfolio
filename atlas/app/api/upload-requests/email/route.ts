@@ -19,7 +19,7 @@ import {
   getPeopleMap,
   markUploadRequestEmailed,
 } from "@/lib/db";
-import { sendUploadInvite, sendUploadInvites, emailConfigured, type Invite } from "@/lib/email";
+import { sendUploadInvite, sendUploadInvites, recordSends, emailConfigured, type Invite } from "@/lib/email";
 import { normalizeName } from "@/lib/gdocs";
 
 function baseUrl(req: Request): string {
@@ -71,6 +71,7 @@ export async function POST(req: Request) {
       to?: string;
       sent: boolean;
       reason?: string;
+      recordFailed?: boolean;
     }[] = [];
 
     // Resolve every recipient first, then send in one batched call: one fetch
@@ -108,11 +109,7 @@ export async function POST(req: Request) {
     }
 
     const sends = await sendUploadInvites(queued.map((q) => q.invite));
-    for (const [i, q] of queued.entries()) {
-      const r = sends[i];
-      if (r.sent) await markUploadRequestEmailed(q.token, q.to);
-      results.push({ id: q.id, title: q.title, to: q.to, sent: r.sent, reason: r.sent ? undefined : r.error || "send failed" });
-    }
+    results.push(...(await recordSends(queued, sends, markUploadRequestEmailed)));
 
     return Response.json({
       results,
@@ -145,11 +142,17 @@ export async function POST(req: Request) {
   }
 
   const r = await sendUploadInvite(email, `${base}/contribute/${request.token}`, project.title, request.expiresAt);
-  if (r.sent) await markUploadRequestEmailed(request.token, email);
   if (!r.sent) {
     // sendUploadInvite never throws, so an unsent mail arrives here as a reason
     // rather than as a 500 with an empty body.
     return Response.json({ error: r.error || "Send failed" }, { status: 502 });
   }
-  return Response.json({ sent: true, to: email });
+  // Same rule as bulk: the mail is out, so a failed record is a 200 with a flag,
+  // never a 500 that invites a second send.
+  const [row] = await recordSends(
+    [{ id: projectId, title: project.title, to: email, token: request.token }],
+    [r],
+    markUploadRequestEmailed
+  );
+  return Response.json({ sent: true, to: email, ...(row.recordFailed ? { recordFailed: true } : {}) });
 }
