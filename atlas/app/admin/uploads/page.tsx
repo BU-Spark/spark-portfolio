@@ -858,14 +858,18 @@ function BulkPanel({ notify }: { notify: Notify }) {
       });
       // Name the failures rather than just counting them — "3 failed" sends
       // someone hunting through rows to find which.
-      const failed = (d.results as { title?: string; sent: boolean; reason?: string }[]).filter(
-        (r) => !r.sent
-      );
+      const rows = d.results as { title?: string; sent: boolean; reason?: string; recordFailed?: boolean }[];
+      const failed = rows.filter((r) => !r.sent);
+      // Sent but not recorded: after the refresh below these rows look unsent, so
+      // say so loudly or the next click emails the same PMs twice.
+      const unrecorded = rows.filter((r) => r.recordFailed);
       notify(
-        failed.length ? "err" : "ok",
+        failed.length || unrecorded.length ? "err" : "ok",
         failed.length
           ? `Emailed ${d.sent}; ${failed.length} failed — ${failed[0].title ?? "a project"}: ${failed[0].reason}`
-          : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
+          : unrecorded.length
+            ? `Emailed ${d.sent}, but ${unrecorded.length} send record(s) failed to save — they will look unsent; do not resend: ${unrecorded.map((r) => r.title).join(", ")}`
+            : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
       );
       // Pull the persisted send records back, so the badges reflect the database
       // rather than this session's memory of it.

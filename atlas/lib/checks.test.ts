@@ -7,6 +7,7 @@ import {
   checkProject,
   hasBlocker,
   galleryReadiness,
+  statusAlive,
 } from "./checks";
 import type { Project, Run } from "./types";
 
@@ -133,5 +134,14 @@ describe("checkProject / readiness", () => {
     const rich = clean({ prodUrl: "https://live.example", topics: ["Health"], clientDesc: "About" });
     const thin = clean({ images: [], tech: [], repoUrl: null, partner: "Acme" });
     expect(galleryReadiness(rich)).toBeGreaterThan(galleryReadiness(thin));
+  });
+});
+
+describe("statusAlive", () => {
+  it("treats 404/410 as dead and HEAD/auth rejections as alive", () => {
+    expect(statusAlive(404)).toBe(false);
+    expect(statusAlive(410)).toBe(false);
+    for (const s of [200, 301, 401, 403, 405]) expect(statusAlive(s)).toBe(true);
+    expect(statusAlive(503)).toBe(false);
   });
 });

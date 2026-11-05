@@ -30,7 +30,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { getProjectAdmin, updateProject, recordPdCompletion } from "@/lib/db";
-import { checkProject, hasBlocker, type Finding } from "@/lib/checks";
+import { checkProject, hasBlocker, statusAlive, type Finding } from "@/lib/checks";
 import { ORGS } from "@/lib/authz";
 
 function bearerMatches(header: string | null, token: string): boolean {
@@ -47,11 +47,11 @@ async function linkAlive(url: string): Promise<boolean | null> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 5000);
   try {
-    // HEAD first (cheap); many hosts reject it, so a 405 is not a dead link — treat
-    // any response at all as alive. `null` means "couldn't tell", which is reported
+    // HEAD first (cheap); many hosts reject it, so a 405 is not a dead link — only
+    // 404/410 are (see statusAlive). `null` means "couldn't tell", which is reported
     // as a warning rather than counted against the submission.
     const res = await fetch(url, { method: "HEAD", redirect: "follow", signal: ac.signal });
-    return res.status < 500;
+    return statusAlive(res.status);
   } catch {
     return null;
   } finally {

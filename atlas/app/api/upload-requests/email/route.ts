@@ -19,7 +19,7 @@ import {
   getPeopleMap,
   markUploadRequestEmailed,
 } from "@/lib/db";
-import { sendUploadInvite, sendUploadInvites, emailConfigured, type Invite } from "@/lib/email";
+import { sendUploadInvite, sendUploadInvites, recordSends, emailConfigured, type Invite } from "@/lib/email";
 import { normalizeName } from "@/lib/gdocs";
 
 function baseUrl(req: Request): string {
@@ -71,6 +71,7 @@ export async function POST(req: Request) {
       to?: string;
       sent: boolean;
       reason?: string;
+      recordFailed?: boolean;
     }[] = [];
 
     // Resolve every recipient first, then send in one batched call: one fetch
@@ -108,11 +109,7 @@ export async function POST(req: Request) {
     }
 
     const sends = await sendUploadInvites(queued.map((q) => q.invite));
-    for (const [i, q] of queued.entries()) {
-      const r = sends[i];
-      if (r.sent) await markUploadRequestEmailed(q.token, q.to);
-      results.push({ id: q.id, title: q.title, to: q.to, sent: r.sent, reason: r.sent ? undefined : r.error || "send failed" });
-    }
+    results.push(...(await recordSends(queued, sends, markUploadRequestEmailed)));
 
     return Response.json({
       results,

@@ -106,6 +106,34 @@ export async function sendUploadInvites(
   return out;
 }
 
+/**
+ * Record each delivered invite, AFTER the mail has gone. A record that fails to
+ * save must not turn into a 500: the mail is already out, and an error with no
+ * per-row result makes the admin retry and email the same people again. So a
+ * failed mark stays `sent: true` with `recordFailed` and a reason.
+ */
+export async function recordSends<T extends { id: string; title: string; to: string; token: string }>(
+  queued: T[],
+  sends: { sent: boolean; error?: string }[],
+  mark: (token: string, to: string) => Promise<unknown>
+): Promise<{ id: string; title: string; to: string; sent: boolean; reason?: string; recordFailed?: boolean }[]> {
+  const out = [];
+  for (const [i, q] of queued.entries()) {
+    const r = sends[i];
+    const row = { id: q.id, title: q.title, to: q.to, sent: r.sent, reason: r.sent ? undefined : r.error || "send failed" };
+    if (r.sent) {
+      try {
+        await mark(q.token, q.to);
+      } catch (e) {
+        out.push({ ...row, recordFailed: true, reason: `sent, but the send record failed to save (${errorText(e)}) — do not resend` });
+        continue;
+      }
+    }
+    out.push(row);
+  }
+  return out;
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

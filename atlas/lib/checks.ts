@@ -126,6 +126,16 @@ export function checkDatasets(datasets: Project["datasets"]): Finding[] {
   return out;
 }
 
+/**
+ * Whether a dataset link's HTTP status means it is still there. 404/410 say
+ * "gone"; anything else under 500 is alive, because many hosts reject HEAD (405)
+ * or gate access (401/403) while the link works fine in a browser.
+ */
+export function statusAlive(status: number): boolean {
+  if (status === 404 || status === 410) return false;
+  return status < 500;
+}
+
 /** A run needs a term and a course to be a real run. */
 export function checkRuns(runs: Run[]): Finding[] {
   const real = (runs ?? []).filter((r) => (r.term ?? "").trim() && (r.course ?? "").trim());
