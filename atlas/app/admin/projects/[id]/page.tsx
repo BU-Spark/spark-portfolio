@@ -14,6 +14,7 @@ import { getProjectAdmin, listContributors } from "@/lib/db";
 import { courseLabel } from "@/lib/data";
 import { disciplineColor } from "@/lib/colors";
 import ProjectGallery from "@/components/ProjectGallery";
+import KnownAliases from "@/components/KnownAliases";
 import {
   primaryDiscipline,
   projectDisciplines,
@@ -224,6 +225,7 @@ export default async function AdminProjectDetailPage({
             >
               {project.title}
             </h1>
+            <KnownAliases aliases={project.aliases} />
 
             {/* Status badges */}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>

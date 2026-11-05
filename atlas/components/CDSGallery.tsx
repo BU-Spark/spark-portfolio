@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 export type CdsProject = {
   id: string;
   title: string;
+  aliases: string[]; // search-only alternate names; never displayed in place of title
   discipline: string;
   topics: string[];
   term: string;
@@ -109,7 +110,7 @@ export default function CDSGallery({ projects }: { projects: CdsProject[] }) {
       if (progs.size && !p.programs.some((x) => progs.has(x))) return false;
       if (terms.size && !p.terms.some((t) => terms.has(t))) return false;
       if (needle) {
-        const hay = [p.title, p.blurb, p.partner, ...p.disciplines, ...p.programs, ...p.topics, ...(p.tech ?? [])].join(" ").toLowerCase();
+        const hay = [p.title, ...p.aliases, p.blurb, p.partner, ...p.disciplines, ...p.programs, ...p.topics, ...(p.tech ?? [])].join(" ").toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;

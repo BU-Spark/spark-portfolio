@@ -31,6 +31,7 @@ import { connectOnceMore, isReadOnly } from "./retry";
 import { normalizeName, matchKey, PROJECT_ALIASES, cleanPersonName } from "./gdocs";
 import { semesterRank } from "./semester";
 import { ORGS, canEdit, canMerge, type Actor } from "./authz";
+import { normalizeAliases, MAX_ALIASES } from "./project";
 
 // Reuse one pool across hot reloads / warm serverless invocations.
 const globalForPool = globalThis as unknown as { sparkPool?: Pool };
@@ -229,6 +230,7 @@ interface ProjectRow {
   client_url: string | null;
   client_desc: string | null;
   topics: string[] | null;
+  aliases: string[] | null;
   datasets: ProjectDataset[] | null;
   pd_url: string | null;
   drive_url: string | null;
@@ -331,13 +333,15 @@ function rowToProject(r: ProjectRow, includePrivate = false): Project {
     // importer needs silently reads `undefined` through the public projection.
     status: r.status ?? "complete",
     topics: r.topics ?? [],
+    // Public, like title: alternate names only (never ids/slugs).
+    aliases: r.aliases ?? [],
     datasets: r.datasets ?? [],
     runs,
   };
 }
 
 const COLS =
-  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, visibility, repo_url, prod_url, code_private, client_url, client_desc, surfaces, owner_org, status, topics, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
+  "id, title, blurb, client_type, partner, contact, contacts, tech, images, featured, custom, published, visibility, repo_url, prod_url, code_private, client_url, client_desc, surfaces, owner_org, status, topics, aliases, datasets, pd_url, drive_url, tech_note, blurb_locked, spark_program_lead, pm, tpm, senior_advisor, tech_advisor, eir, eir_is_instructor, class_instructors, runs";
 
 // PUBLIC reads — only published projects, private run fields stripped. Cached in
 // the Next data cache and tagged "projects" so every visitor doesn't trigger a
@@ -518,6 +522,8 @@ export interface NewProject {
   /** Visibility. Omitted falls back to 'hidden', which is fail-closed: a create
    *  path that forgets this makes a draft, never something public. */
   visibility?: string;
+  /** Alternate human-readable names; normalised against the title on write. */
+  aliases?: string[];
 }
 
 // Normalize a contacts list for storage: trim name/email, drop rows that are
@@ -596,8 +602,8 @@ export async function addProject(p: NewProject): Promise<void> {
       : "hidden";
   await query(
     `INSERT INTO projects
-       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts, owner_org, surfaces, status, visibility)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17,$18,$19,$20)
+       (id, title, blurb, client_type, partner, tech, images, featured, custom, published, repo_url, runs, contact, prod_url, pd_url, contacts, owner_org, surfaces, status, visibility, aliases)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16::jsonb,$17,$18,$19,$20,$21)
      ON CONFLICT (id) DO UPDATE SET
        title=EXCLUDED.title, blurb=EXCLUDED.blurb, client_type=EXCLUDED.client_type,
        partner=EXCLUDED.partner, tech=EXCLUDED.tech, images=EXCLUDED.images,
@@ -616,6 +622,9 @@ export async function addProject(p: NewProject): Promise<void> {
     // status is omitted too: the importer re-sends every tracker row on every sync,
     // so including it would drag a project an admin had moved to 'active' back to
     // whatever the feed implies, every single run.
+    //
+    // aliases is omitted for the same reason: the importer never carries them, so a
+    // re-sync must not wipe names an admin recorded.
     [
       p.id,
       p.title,
@@ -643,6 +652,7 @@ export async function addProject(p: NewProject): Promise<void> {
       // rather than a failed insert on the admin's create form.
       PROJECT_STATUSES.includes((p.status ?? "") as never) ? (p.status as string) : "pending",
       visibility,
+      normalizeAliases(p.aliases ?? [], p.title),
     ]
   );
 }
@@ -672,6 +682,7 @@ export interface ProjectPatch {
   // this interface, because the importer never sets it (see addProject).
   status?: string;
   topics?: string[];
+  aliases?: string[]; // public alternate names; normalised against the title on write
   datasets?: ProjectDataset[];
   pdUrl?: string | null; // admin-only PD doc link (distinct from prodUrl)
   driveUrl?: string | null; // admin-only project Drive folder
@@ -714,6 +725,21 @@ export async function updateProject(id: string, patch: ProjectPatch): Promise<vo
   if (patch.clientDesc !== undefined) add("client_desc", patch.clientDesc);
   if (patch.surfaces !== undefined) add("surfaces", patch.surfaces);
   if (patch.topics !== undefined) add("topics", patch.topics);
+  if (patch.aliases !== undefined) {
+    // Normalise against the title the row will have after this update.
+    const title =
+      patch.title ??
+      (await query<{ title: string }>(`SELECT title FROM projects WHERE id = $1`, [id]))[0]?.title ??
+      "";
+    add("aliases", normalizeAliases(patch.aliases, title));
+  } else if (patch.title !== undefined) {
+    // A rename onto an existing alias drops that alias, so a project never lists its
+    // own title as an alias. Order-preserving.
+    vals.push(patch.title.trim());
+    sets.push(
+      `aliases = ARRAY(SELECT a FROM unnest(aliases) WITH ORDINALITY u(a, i) WHERE lower(btrim(a)) <> lower($${vals.length}) ORDER BY i)`
+    );
+  }
   if (patch.datasets !== undefined)
     add("datasets", JSON.stringify(patch.datasets), "::jsonb");
   if (patch.pdUrl !== undefined) add("pd_url", patch.pdUrl);
@@ -906,6 +932,7 @@ export async function mergeProjects(
     tech_note: string | null; featured: boolean; published: boolean;
     visibility: string | null; runs: Run[] | null;
     surfaces: string[] | null; owner_org: string | null;
+    aliases: string[] | null;
   };
 
   const nz = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
@@ -916,7 +943,7 @@ export async function mergeProjects(
     const { rows } = await client.query<RawRow>(
       `SELECT id, title, blurb, blurb_term, blurb_locked, partner, client_type,
               contact, contacts, tech, images, repo_url, prod_url, drive_url,
-              tech_note, featured, published, visibility, runs, surfaces, owner_org
+              tech_note, featured, published, visibility, runs, surfaces, owner_org, aliases
          FROM projects WHERE id = ANY($1)
          ORDER BY id
          FOR UPDATE`,
@@ -1012,6 +1039,13 @@ export async function mergeProjects(
       ...new Set([...(survivor.surfaces ?? []), ...(absorbed.surfaces ?? [])]),
     ].filter((s) => SURFACE_KEYS.includes(s));
 
+    // aliases UNION, plus the losing title: after a merge the absorbed project's
+    // name is exactly an "old name it was known by", and must stay searchable.
+    const aliases = normalizeAliases(
+      [...(survivor.aliases ?? []), survivor.title, absorbed.title, ...(absorbed.aliases ?? [])],
+      title
+    );
+
     // owner_org is NOT merged: the surviving record keeps its own owner. Union is
     // meaningless for a single-valued authority field, and "the survivor keeps its
     // owner" is the only rule that needs no explanation later. Deliberately absent
@@ -1022,12 +1056,12 @@ export async function mergeProjects(
          title=$1, blurb=$2, blurb_term=$3, blurb_locked=$4, partner=$5, client_type=$6,
          contact=$7, contacts=$8::jsonb, tech=$9, images=$10, repo_url=$11, prod_url=$12,
          drive_url=$13, tech_note=$14, featured=$15, published=$16, runs=$17::jsonb,
-         surfaces=$19, visibility=$20
+         surfaces=$19, visibility=$20, aliases=$21
        WHERE id=$18`,
       [title, blurb, blurbTerm, blurbLocked, partner, clientType, contact,
        JSON.stringify(contacts), tech, images, repoUrl, prodUrl, driveUrl, techNote,
        featured, published, JSON.stringify(runs), survivorId,
-       surfaces.length ? surfaces : ["spark"], visibility]
+       surfaces.length ? surfaces : ["spark"], visibility, aliases.slice(0, MAX_ALIASES)]
     );
 
     // `status` is deliberately absent from the UPDATE above, which means the

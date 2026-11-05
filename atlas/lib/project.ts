@@ -128,3 +128,34 @@ export function publishBlockers(p: Pick<Project, "blurb" | "runs">): string[] {
   if (!p.runs.some((r) => r.term && r.course?.trim())) out.push("course & term");
   return out;
 }
+
+// ── Title aliases ────────────────────────────────────────────────────────────
+// Human-readable other names for a project (long form, old names). Searchable, but
+// the project always displays under `title`. NOT ids or repo slugs — never derive
+// these from `id`/`repoUrl`.
+export const MAX_ALIASES = 20;
+export const MAX_ALIAS_LEN = 200;
+
+// Trim, drop blanks, drop case-insensitive duplicates and anything equal to the title.
+export function normalizeAliases(list: readonly string[], title: string): string[] {
+  const seen = new Set([title.trim().toLowerCase()]);
+  const out: string[] = [];
+  for (const raw of list) {
+    const a = String(raw ?? "").trim();
+    const k = a.toLowerCase();
+    if (!a || seen.has(k)) continue;
+    seen.add(k);
+    out.push(a);
+  }
+  return out;
+}
+
+// Request-boundary check: a list of ≤ MAX_ALIASES strings, each ≤ MAX_ALIAS_LEN.
+export function parseAliases(v: unknown): { aliases: string[] } | { error: string } {
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string"))
+    return { error: "aliases must be a list of strings." };
+  if (v.length > MAX_ALIASES) return { error: `At most ${MAX_ALIASES} aliases.` };
+  if ((v as string[]).some((x) => x.trim().length > MAX_ALIAS_LEN))
+    return { error: `Each alias must be at most ${MAX_ALIAS_LEN} characters.` };
+  return { aliases: v as string[] };
+}

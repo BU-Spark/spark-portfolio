@@ -323,6 +323,7 @@ export function useFilters(
       if (q) {
         const hay = [
           p.title,
+          ...(p.aliases ?? []),
           p.blurb,
           p.partner,
           p.clientType,

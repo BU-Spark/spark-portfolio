@@ -130,7 +130,8 @@ CREATE TABLE IF NOT EXISTS projects (
   surfaces text[] NOT NULL DEFAULT '{spark}'::text[],
   owner_org text NOT NULL DEFAULT 'spark'::text,
   status text NOT NULL DEFAULT 'pending'::text,
-  visibility text NOT NULL DEFAULT 'hidden'::text
+  visibility text NOT NULL DEFAULT 'hidden'::text,
+  aliases text[] NOT NULL DEFAULT '{}'::text[]
 );
 ALTER TABLE projects ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
 ALTER TABLE projects ADD CONSTRAINT projects_owner_org_chk CHECK ((owner_org = ANY (ARRAY['spark'::text, 'cds'::text])));

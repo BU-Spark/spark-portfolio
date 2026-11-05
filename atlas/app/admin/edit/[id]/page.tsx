@@ -174,6 +174,7 @@ interface EditState {
   // (form.runs[i].pm, .pdUrl, …), not at the project level.
   tech: string[];
   topics: string[];
+  aliases: string[]; // other human-readable names (long form, old titles) — searchable
   datasets: { label: string; url: string }[];
   images: (string | null)[]; // resolved URLs (existing) or bare keys (new uploads)
   featured: boolean;
@@ -544,6 +545,7 @@ export default function EditProjectPage() {
         blurbLocked: !!project.blurbLocked,
         tech: project.tech ?? [],
         topics: project.topics ?? [],
+        aliases: project.aliases ?? [],
         datasets: project.datasets ?? [],
         images: imgs.slice(0, 4).map((v) => v || null),
         featured: !!project.featured,
@@ -760,6 +762,7 @@ export default function EditProjectPage() {
       blurbLocked: form.blurbLocked,
       tech: form.tech,
       topics: form.topics,
+      aliases: form.aliases,
       datasets: form.datasets.filter((d) => d.label.trim()),
       images: form.images.filter(Boolean).map((v) => toStoredKey(v as string)),
       featured: form.featured,
@@ -983,6 +986,20 @@ export default function EditProjectPage() {
               onChange={setVal("title")}
               placeholder="e.g. Boston 311 Service Equity Dashboard"
             />
+          </div>
+
+          {/* Aliases */}
+          <div style={S.field}>
+            <label style={S.lab}>Aliases</label>
+            <TagInput
+              value={form.aliases}
+              onChange={(v) => set("aliases", v)}
+              placeholder="Long form, old names…"
+            />
+            <div style={S.hint}>
+              Other names this project is known by. Searchable; it still displays under the
+              title. Human-readable names only — not the repo slug. Press Enter to add each.
+            </div>
           </div>
 
           {/* Description + PD auto-fill */}

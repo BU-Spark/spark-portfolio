@@ -631,6 +631,7 @@ export default function ManageProjectsPage() {
       if (!q) return true;
       const hay = [
         p.title,
+        ...(p.aliases ?? []),
         p.partner,
         p.clientType,
         ...projectCourses(p),

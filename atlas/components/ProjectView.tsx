@@ -6,6 +6,7 @@
 import MastheadLogo from "@/components/MastheadLogo";
 import { GalleryBackLink } from "@/lib/shared";
 import ProjectGallery from "@/components/ProjectGallery";
+import KnownAliases from "@/components/KnownAliases";
 import { courseLabel } from "@/lib/data";
 import { disciplineColor } from "@/lib/colors";
 import {
@@ -265,6 +266,7 @@ export default function ProjectView({ project }: { project: Project }) {
         >
           {project.title}
         </h1>
+        <KnownAliases aliases={project.aliases} />
 
         {/* Prominent client block — only when there's a client to show.
             When there's an "about the client" blurb it becomes a native <details>

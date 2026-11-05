@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { missingInfo, projectTerms, termRank } from "./project";
+import { missingInfo, normalizeAliases, parseAliases, projectTerms, termRank } from "./project";
 import { SPARK_TERMS } from "./data";
 import type { Project, Run } from "./types";
 
@@ -68,5 +68,26 @@ describe("projectTerms", () => {
 describe("termRank", () => {
   it("ranks earlier entries of SPARK_TERMS as more recent (smaller)", () => {
     expect(termRank(SPARK_TERMS[0])).toBeLessThan(termRank(SPARK_TERMS[1]));
+  });
+});
+
+describe("normalizeAliases", () => {
+  it("trims, drops blanks, case-insensitive dupes and the title itself", () => {
+    expect(
+      normalizeAliases(
+        ["  Accessible Paths Learning Lab ", "", "  ", "accessible paths learning lab", "APLL", "Old Name"],
+        "apll"
+      )
+    ).toEqual(["Accessible Paths Learning Lab", "Old Name"]);
+  });
+});
+
+describe("parseAliases", () => {
+  it("rejects non-lists, non-strings, too many and too long", () => {
+    expect(parseAliases("x")).toHaveProperty("error");
+    expect(parseAliases([1])).toHaveProperty("error");
+    expect(parseAliases(Array(21).fill("a"))).toHaveProperty("error");
+    expect(parseAliases(["a".repeat(201)])).toHaveProperty("error");
+    expect(parseAliases(["ok"])).toEqual({ aliases: ["ok"] });
   });
 });
