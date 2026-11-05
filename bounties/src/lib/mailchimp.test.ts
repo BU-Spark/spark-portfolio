@@ -7,7 +7,15 @@
  * mutual-exclusivity clearing is checked in both directions.
  */
 import assert from 'node:assert/strict';
-import { tagsFor, allTagsForBounty, parseTags, subscriberHash } from './mailchimp.ts';
+import {
+  tagsFor,
+  allTagsForBounty,
+  parseTags,
+  subscriberHash,
+  reconcileSlice,
+  RECONCILE_ROWS_PER_CALL,
+  PRUNE_CLEARS_PER_CALL,
+} from './mailchimp.ts';
 
 const S = 'plate-gallery';
 let failed = 0;
@@ -148,6 +156,35 @@ check('tagsFor and parseTags round-trip', () => {
       assert.equal(rows[0].workingMode, workingMode);
       assert.equal(rows[0].teamId, 'tid');
     }
+});
+
+// ── reconcileSlice: keeps one request under the 50-subrequest cap ──────────
+check('reconcile pages stay under 50 subrequests and cover every row once', () => {
+  // syncInterest = 2 fetches per row; leave room for the DB connection.
+  assert.ok(RECONCILE_ROWS_PER_CALL * 2 <= 45);
+  assert.ok(PRUNE_CLEARS_PER_CALL <= 45);
+  const rows = Array.from({ length: 53 }, (_, i) => i);
+  const seen: number[] = [];
+  let offset: number | null = 0;
+  let calls = 0;
+  while (offset !== null) {
+    const { batch, nextOffset, remaining }: ReturnType<typeof reconcileSlice<number>> =
+      reconcileSlice(rows, offset);
+    assert.ok(batch.length <= RECONCILE_ROWS_PER_CALL);
+    assert.equal(remaining, rows.length - (offset + batch.length));
+    seen.push(...batch);
+    offset = nextOffset;
+    calls++;
+  }
+  assert.deepEqual(seen, rows);
+  assert.equal(calls, Math.ceil(53 / RECONCILE_ROWS_PER_CALL));
+});
+
+check('reconcileSlice tolerates junk / out-of-range offsets', () => {
+  assert.deepEqual(reconcileSlice([1, 2, 3], NaN, 2), { batch: [1, 2], nextOffset: 2, remaining: 1 });
+  assert.deepEqual(reconcileSlice([1, 2, 3], -5, 2), { batch: [1, 2], nextOffset: 2, remaining: 1 });
+  assert.deepEqual(reconcileSlice([1, 2, 3], 99, 2), { batch: [], nextOffset: null, remaining: 0 });
+  assert.deepEqual(reconcileSlice([], 0), { batch: [], nextOffset: null, remaining: 0 });
 });
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

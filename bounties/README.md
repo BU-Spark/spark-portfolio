@@ -357,7 +357,11 @@ the invariant via UNIQUE (bounty_slug, person_id); this keeps the mirror honest.
   Mailchimp outage cannot fail a student's signup.
 - `POST /api/mailchimp/reconcile` (Bearer ADMIN_KEY) repairs drift when a
   fire-and-forget write is lost. `?prune=1` also clears tags Postgres does not
-  back — the only destructive direction, hence opt-in.
+  back — the only destructive direction, hence opt-in. It is **paged** (Workers
+  Free caps a request at 50 subrequests, two per row): each call syncs 20 rows
+  from `?offset=` and returns `next_offset`; repeat until it is `null`.
+  `?prune=1` is a separate pass clearing up to 40 orphans per call; repeat
+  while `prune_remaining > 0`.
 
 > **Do not run `?prune=1` while hackbu.dev still accepts signups.** hackbu.dev
 > writes into the SAME audience (3baefe8534) from its own API, with the same

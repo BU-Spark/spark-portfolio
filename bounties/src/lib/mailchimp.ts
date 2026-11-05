@@ -309,3 +309,24 @@ export function mirror(locals: unknown, work: (env: MailchimpEnv) => Promise<voi
     ?.runtime?.ctx;
   ctx?.waitUntil?.(running);
 }
+
+/**
+ * Workers Free caps one request at 50 subrequests, and syncInterest makes two
+ * (member PUT + tags POST). An unbounded loop over every signup dies past ~25
+ * rows -- the same limit that broke Atlas bulk email on 2026-11-05. 20 rows is
+ * 40 fetches, leaving headroom for the database connection.
+ */
+export const RECONCILE_ROWS_PER_CALL = 20;
+/** Prune makes one fetch per orphan, plus one per 1000 members to list them. */
+export const PRUNE_CLEARS_PER_CALL = 40;
+
+/** One window of `items` starting at `offset`, and where the next call starts. */
+export function reconcileSlice<T>(items: T[], offset: number, size = RECONCILE_ROWS_PER_CALL) {
+  const start = Math.max(0, Math.floor(offset) || 0);
+  const end = Math.min(items.length, start + size);
+  return {
+    batch: items.slice(start, end),
+    nextOffset: end < items.length ? end : null,
+    remaining: items.length - end,
+  };
+}

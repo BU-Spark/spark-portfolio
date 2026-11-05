@@ -107,7 +107,7 @@ CREATE INDEX IF NOT EXISTS bounty_interest_completed_idx
   ON bounty_interest (bounty_slug, completed_at) WHERE completed_at IS NOT NULL;
 
 -- Convenience views, so answering "who signed up for what" is a one-liner
--- instead of a join you have to remember. CREATE OR REPLACE keeps them
+-- instead of a join you have to remember. DROP IF EXISTS + CREATE keeps them
 -- idempotent. Bounty *titles* live in markdown, not the DB, so these key on
 -- slug only.
 -- =============================================================================
@@ -131,7 +131,11 @@ CREATE TABLE IF NOT EXISTS bounty_award (
   PRIMARY KEY (bounty_slug, team_key)
 );
 
-CREATE OR REPLACE VIEW bounty_roster AS
+-- DROP, not CREATE OR REPLACE (mirrors migrations/001): replacing a view can
+-- only APPEND columns, and team_key / team_payout_cents sit mid-list, so
+-- re-running over an older bounty_roster would fail. Still idempotent.
+DROP VIEW IF EXISTS bounty_roster;
+CREATE VIEW bounty_roster AS
 SELECT bi.bounty_slug,
        p.email, p.first_name, p.last_name,
        bi.intent, bi.working_mode, bi.team_id,
@@ -152,7 +156,8 @@ LEFT JOIN bounty_award a
       AND a.team_key = coalesce(bi.team_id, 'person:' || bi.person_id::text);
 
 -- One row per PERSON across all bounties: SELECT * FROM bounty_people;
-CREATE OR REPLACE VIEW bounty_people AS
+DROP VIEW IF EXISTS bounty_people;
+CREATE VIEW bounty_people AS
 SELECT p.email, p.first_name, p.last_name,
        count(*)                                        AS bounty_count,
        array_agg(bi.bounty_slug ORDER BY bi.bounty_slug) AS bounties,
@@ -193,14 +198,17 @@ GRANT CONNECT ON DATABASE railway TO bounties_app;
 GRANT USAGE   ON SCHEMA public    TO bounties_app;
 REVOKE CREATE ON SCHEMA public FROM bounties_app;
 
--- Exactly the two tables, exactly the four verbs.
+-- Exactly the three tables, exactly the four verbs.
 GRANT SELECT, INSERT, UPDATE, DELETE ON person          TO bounties_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON bounty_interest TO bounties_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bounty_award    TO bounties_app;
 
--- bigserial primary keys need the sequences.
+-- Views are dropped and recreated above, which discards their grants, so
+-- these must be re-issued on every run.
 GRANT SELECT ON bounty_roster TO bounties_app;
 GRANT SELECT ON bounty_people TO bounties_app;
 
+-- bigserial primary keys need the sequences.
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO bounties_app;
 
 -- So a future table added by SECTION 1 doesn't silently 403 the app.
@@ -212,8 +220,8 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 
 -- =============================================================================
 -- SECTION 3 — verify before you rely on it
--- Expect: two tables, the CHECK constraints present, and bounties_app holding
--- exactly SELECT/INSERT/UPDATE/DELETE on both tables.
+-- Expect: three tables, the CHECK constraints present, and bounties_app holding
+-- exactly SELECT/INSERT/UPDATE/DELETE on all three tables (SELECT on the views).
 -- =============================================================================
 
 SELECT tablename FROM pg_tables

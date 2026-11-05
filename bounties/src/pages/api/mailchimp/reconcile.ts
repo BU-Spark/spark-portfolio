@@ -8,6 +8,8 @@ import {
   clearInterest,
   listMembers,
   parseTags,
+  reconcileSlice,
+  PRUNE_CLEARS_PER_CALL,
 } from '../../../lib/mailchimp';
 import { rateLimit, getClientIp } from '../../../lib/rate-limit';
 import { requireAdmin, ADMIN_COOKIE } from '../../../lib/admin';
@@ -38,14 +40,20 @@ import { requireAdmin, ADMIN_COOKIE } from '../../../lib/admin';
  * writer. Until then the non-prune path is still useful and still correct: it
  * only adds and corrects, so it cannot delete a hackbu.dev signup.
  *
- *   curl -X POST https://bounties.buspark.io/api/mailchimp/reconcile \
+ * PAGED. Workers Free allows 50 subrequests per request and every row costs
+ * two, so one call syncs RECONCILE_ROWS_PER_CALL rows from `?offset=` and
+ * returns `next_offset` (null when done) and `remaining`; call again with
+ * next_offset until it is null. `?prune=1` is a separate pass (no sync) that
+ * clears at most PRUNE_CLEARS_PER_CALL orphans; repeat while prune_remaining > 0.
+ *
+ *   curl -X POST "https://bounties.buspark.io/api/mailchimp/reconcile?offset=0" \
  *        -H "Authorization: Bearer $ADMIN_KEY"
  */
 export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
   const denied = requireAdmin(request, locals, cookies.get(ADMIN_COOKIE)?.value);
   if (denied) return denied;
 
-  const rl = rateLimit(getClientIp(request), { name: 'reconcile', limit: 3, windowSec: 300 });
+  const rl = rateLimit(getClientIp(request), { name: 'reconcile', limit: 30, windowSec: 300 });
   if (!rl.allowed) return json({ error: 'Rate limited' }, 429);
 
   const mc = resolveMailchimpEnv(locals);
@@ -68,14 +76,19 @@ export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
         `SELECT p.email, p.first_name, p.last_name,
                 bi.bounty_slug, bi.intent, bi.working_mode, bi.team_id
            FROM bounty_interest bi
-           JOIN person p ON p.id = bi.person_id`
+           JOIN person p ON p.id = bi.person_id
+          ORDER BY bi.id`
       );
       return rows;
     });
 
     let synced = 0;
     const failures: string[] = [];
-    for (const r of rows) {
+    // Prune is its own pass, so its fetches never share a budget with sync.
+    const page = prune
+      ? { batch: [], nextOffset: null, remaining: 0 }
+      : reconcileSlice(rows, Number(url.searchParams.get('offset') ?? 0));
+    for (const r of page.batch) {
       try {
         await syncInterest(
           mc,
@@ -95,6 +108,7 @@ export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
     }
 
     let pruned = 0;
+    let pruneRemaining = 0;
     if (prune) {
       // Tags Mailchimp has that Postgres does not back. Someone who withdrew
       // while the mirror was failing would otherwise still receive mail.
@@ -103,17 +117,22 @@ export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
       // byte here would make this file binary to grep and `file`.
       const KEY = (slug: string, email: string) => `${slug}\u0000${email.toLowerCase()}`;
       const truth = new Set(rows.map((r) => KEY(r.bounty_slug, r.email)));
+      const orphans: { email: string; slug: string; teamId: string | null }[] = [];
       for (const m of await listMembers(mc)) {
         for (const parsed of parseTags(m.tags).rows) {
           if (truth.has(KEY(parsed.bountySlug, m.email))) continue;
-          try {
-            await clearInterest(mc, m.email, parsed.bountySlug, parsed.teamId);
-            pruned++;
-          } catch (err) {
-            failures.push(
-              `prune ${parsed.bountySlug}/${m.email}: ${err instanceof Error ? err.message : err}`
-            );
-          }
+          orphans.push({ email: m.email, slug: parsed.bountySlug, teamId: parsed.teamId });
+        }
+      }
+      // Always from the front: a cleared orphan drops out of the next listing.
+      const { batch, remaining } = reconcileSlice(orphans, 0, PRUNE_CLEARS_PER_CALL);
+      pruneRemaining = remaining;
+      for (const o of batch) {
+        try {
+          await clearInterest(mc, o.email, o.slug, o.teamId);
+          pruned++;
+        } catch (err) {
+          failures.push(`prune ${o.slug}/${o.email}: ${err instanceof Error ? err.message : err}`);
         }
       }
     }
@@ -122,7 +141,10 @@ export const POST: APIRoute = async ({ request, url, locals, cookies }) => {
       success: failures.length === 0,
       rows: rows.length,
       synced,
+      next_offset: page.nextOffset,
+      remaining: page.remaining,
       pruned,
+      prune_remaining: pruneRemaining,
       prune_enabled: prune,
       failures,
     });

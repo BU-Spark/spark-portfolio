@@ -136,7 +136,9 @@ CREATE TABLE IF NOT EXISTS projects (
 ALTER TABLE projects ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
 ALTER TABLE projects ADD CONSTRAINT projects_owner_org_chk CHECK ((owner_org = ANY (ARRAY['spark'::text, 'cds'::text])));
 ALTER TABLE projects ADD CONSTRAINT projects_status_chk CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'in_review'::text, 'complete'::text])));
-ALTER TABLE projects ADD CONSTRAINT projects_visibility_chk CHECK ((visibility = ANY (ARRAY['hidden'::text, 'internal'::text, 'public'::text])));
+-- HAND-EDITED 2026-11-05 to match migration 005 + prod's live definition (no DB access
+-- to regenerate). A regeneration from prod yields this same CHECK and drops this note.
+ALTER TABLE projects ADD CONSTRAINT projects_visibility_chk CHECK ((visibility = ANY (ARRAY['hidden'::text, 'restricted'::text, 'internal'::text, 'public'::text])));
 CREATE INDEX idx_projects_listing ON public.projects USING btree (published, featured, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (
