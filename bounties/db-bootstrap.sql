@@ -6,7 +6,9 @@
 --
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db-bootstrap.sql
 --
--- Every section is idempotent, so re-running the file is safe.
+-- Every section is idempotent, EXCEPT the `ALTER ROLE bounties_app WITH
+-- PASSWORD` line in SECTION 2, which resets the live app password. Comment it
+-- out before re-running against an existing database.
 --
 -- DO NOT run SECTION 2 on its own. It grants on person / bounty_interest,
 -- which SECTION 1 creates; run out of order it fails with
@@ -155,6 +157,17 @@ LEFT JOIN bounty_award a
        ON a.bounty_slug = bi.bounty_slug
       AND a.team_key = coalesce(bi.team_id, 'person:' || bi.person_id::text);
 
+-- DROP VIEW discarded the grant, so restore it here: re-running SECTION 1 alone
+-- must never leave the app unable to read the view. Guarded because on a fresh
+-- database the role does not exist until SECTION 2 (which grants it again).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bounties_app') THEN
+    GRANT SELECT ON bounty_roster TO bounties_app;
+  END IF;
+END
+$$;
+
 -- One row per PERSON across all bounties: SELECT * FROM bounty_people;
 DROP VIEW IF EXISTS bounty_people;
 CREATE VIEW bounty_people AS
@@ -172,12 +185,21 @@ FROM person p
 JOIN bounty_interest bi ON bi.person_id = p.id
 GROUP BY p.id, p.email, p.first_name, p.last_name;
 
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'bounties_app') THEN
+    GRANT SELECT ON bounty_people TO bounties_app;
+  END IF;
+END
+$$;
+
 
 -- =============================================================================
 -- SECTION 2 — least-privilege application role
 --
--- The app must not connect as `postgres`. This role can read and write the two
--- tables and nothing else: no DDL, no other schemas, no superuser.
+-- The app must not connect as `postgres`. This role can read and write the
+-- three tables (person, bounty_interest, bounty_award), read the two views, and
+-- nothing else: no DDL, no other schemas, no superuser.
 -- Running this changes nothing about existing connections.
 -- =============================================================================
 
@@ -189,8 +211,14 @@ BEGIN
 END
 $$;
 
--- Set (or re-set) the password. This is also how you rotate the APP password
--- later: re-run just this line with a new value.
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-- !! DO NOT RUN THE NEXT LINE ON AN EXISTING DATABASE.                        !!
+-- !! It RESETS the prod app password: the live Worker (via Hyperdrive) keeps  !!
+-- !! the old one and every request fails until the secret is updated too.    !!
+-- !! Re-running this file against prod? Comment the line out first.          !!
+-- !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-- Fresh database: set the password here. Deliberate rotation: run this line
+-- alone with a new value AND update the app's connection secret in the same change.
 ALTER ROLE bounties_app WITH PASSWORD 'PUT_A_NEW_APP_PASSWORD_HERE';
 
 -- No CREATE rights anywhere; connect + use the schema only.

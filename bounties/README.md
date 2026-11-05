@@ -358,10 +358,13 @@ the invariant via UNIQUE (bounty_slug, person_id); this keeps the mirror honest.
 - `POST /api/mailchimp/reconcile` (Bearer ADMIN_KEY) repairs drift when a
   fire-and-forget write is lost. `?prune=1` also clears tags Postgres does not
   back — the only destructive direction, hence opt-in. It is **paged** (Workers
-  Free caps a request at 50 subrequests, two per row): each call syncs 20 rows
-  from `?offset=` and returns `next_offset`; repeat until it is `null`.
-  `?prune=1` is a separate pass clearing up to 40 orphans per call; repeat
-  while `prune_remaining > 0`.
+  Free caps a request at 50 subrequests, two per row): each call syncs the next
+  20 rows with `bounty_interest.id > ?after=` (default 0) and returns
+  `next_after` + `remaining`; call again with `after=<next_after>` until
+  `next_after` is `null`. `?prune=1` is a separate pass: it clears as many
+  orphans as fit in 45 fetches minus the audience list pages, and reports
+  `prune_remaining`, `prune_failed`, `prune_skipped`; repeat while
+  `prune_remaining > 0`.
 
 > **Do not run `?prune=1` while hackbu.dev still accepts signups.** hackbu.dev
 > writes into the SAME audience (3baefe8534) from its own API, with the same

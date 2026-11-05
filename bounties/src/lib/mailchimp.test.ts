@@ -12,16 +12,20 @@ import {
   allTagsForBounty,
   parseTags,
   subscriberHash,
-  reconcileSlice,
+  parseAfter,
+  keysetResult,
+  pruneClearCap,
+  clearOrphans,
   RECONCILE_ROWS_PER_CALL,
-  PRUNE_CLEARS_PER_CALL,
+  SUBREQUEST_BUDGET,
 } from './mailchimp.ts';
 
 const S = 'plate-gallery';
 let failed = 0;
-function check(name: string, fn: () => void) {
+// Async-capable so the clearOrphans case can await; sync checks behave as before.
+async function check(name: string, fn: () => void | Promise<void>) {
   try {
-    fn();
+    await fn();
     console.log(`  ok   ${name}`);
   } catch (e) {
     console.error(`  FAIL ${name}\n       ${(e as Error).message.split('\n')[0]}`);
@@ -158,33 +162,72 @@ check('tagsFor and parseTags round-trip', () => {
     }
 });
 
-// ── reconcileSlice: keeps one request under the 50-subrequest cap ──────────
-check('reconcile pages stay under 50 subrequests and cover every row once', () => {
-  // syncInterest = 2 fetches per row; leave room for the DB connection.
-  assert.ok(RECONCILE_ROWS_PER_CALL * 2 <= 45);
-  assert.ok(PRUNE_CLEARS_PER_CALL <= 45);
-  const rows = Array.from({ length: 53 }, (_, i) => i);
-  const seen: number[] = [];
-  let offset: number | null = 0;
+// ── reconcile: keeps one request under the 50-subrequest cap ───────────────
+check('sync keyset pages stay in budget and cover every row once, despite gaps', () => {
+  // syncInterest = 2 fetches per row.
+  assert.ok(RECONCILE_ROWS_PER_CALL * 2 <= SUBREQUEST_BUDGET);
+  assert.ok(SUBREQUEST_BUDGET < 50);
+  // ids with gaps (deleted rows), as bigint-ish strings like pg returns.
+  const ids = Array.from({ length: 53 }, (_, i) => String(i * 3 + 1));
+  // Mirrors: WHERE id > $after ORDER BY id LIMIT n, count(*) OVER ().
+  const query = (after: string) => {
+    const matching = ids.filter((id) => Number(id) > Number(after));
+    return { page: matching.slice(0, RECONCILE_ROWS_PER_CALL), matching: matching.length };
+  };
+  const seen: string[] = [];
+  let after: string | null = '0';
   let calls = 0;
-  while (offset !== null) {
-    const { batch, nextOffset, remaining }: ReturnType<typeof reconcileSlice<number>> =
-      reconcileSlice(rows, offset);
-    assert.ok(batch.length <= RECONCILE_ROWS_PER_CALL);
-    assert.equal(remaining, rows.length - (offset + batch.length));
-    seen.push(...batch);
-    offset = nextOffset;
+  while (after !== null) {
+    const { page, matching } = query(after);
+    const { nextAfter, remaining } = keysetResult(page, matching);
+    assert.equal(remaining, matching - page.length);
+    seen.push(...page);
+    after = nextAfter;
     calls++;
   }
-  assert.deepEqual(seen, rows);
+  assert.deepEqual(seen, ids);
   assert.equal(calls, Math.ceil(53 / RECONCILE_ROWS_PER_CALL));
+  assert.deepEqual(keysetResult([], 0), { nextAfter: null, remaining: 0 });
 });
 
-check('reconcileSlice tolerates junk / out-of-range offsets', () => {
-  assert.deepEqual(reconcileSlice([1, 2, 3], NaN, 2), { batch: [1, 2], nextOffset: 2, remaining: 1 });
-  assert.deepEqual(reconcileSlice([1, 2, 3], -5, 2), { batch: [1, 2], nextOffset: 2, remaining: 1 });
-  assert.deepEqual(reconcileSlice([1, 2, 3], 99, 2), { batch: [], nextOffset: null, remaining: 0 });
-  assert.deepEqual(reconcileSlice([], 0), { batch: [], nextOffset: null, remaining: 0 });
+check('parseAfter accepts only non-negative integers', () => {
+  assert.equal(parseAfter(null), '0');
+  assert.equal(parseAfter(''), '0');
+  assert.equal(parseAfter('42'), '42');
+  for (const bad of ['-1', '1.5', 'abc', '1e3', ' 1', '1;DROP', '9999999999999999999'])
+    assert.equal(parseAfter(bad), null, bad);
+});
+
+check('prune: list pages + clears never exceed the budget', () => {
+  for (const members of [0, 1, 999, 1000, 1001, 20_000, 44_000, 60_000]) {
+    const listPages = Math.max(1, Math.ceil(members / 1000)); // an empty list is still one GET
+    const cap = pruneClearCap(listPages);
+    assert.ok(cap >= 0);
+    if (listPages <= SUBREQUEST_BUDGET) assert.ok(listPages + cap <= SUBREQUEST_BUDGET, `${members}`);
+    else assert.equal(cap, 0);
+  }
+});
+
+await check('prune: a failing member is tried once per call, later orphans still cleared', async () => {
+  const orphans = [
+    { email: 'Bad@x.edu', slug: 'a' },
+    { email: 'bad@x.edu', slug: 'b' },
+    { email: 'ok1@x.edu', slug: 'a' },
+    { email: 'bad@x.edu', slug: 'c' },
+    { email: 'ok2@x.edu', slug: 'a' },
+    { email: 'ok3@x.edu', slug: 'a' },
+  ];
+  const tried: string[] = [];
+  const r = await clearOrphans(orphans, 3, async (o) => {
+    tried.push(`${o.slug}/${o.email}`);
+    if (o.email.toLowerCase() === 'bad@x.edu') throw new Error('404');
+  });
+  // cap 3 = 3 fetches: bad (fail), ok1, ok2. Skips don't spend budget.
+  assert.deepEqual(tried, ['a/Bad@x.edu', 'a/ok1@x.edu', 'a/ok2@x.edu']);
+  assert.equal(r.cleared, 2);
+  assert.equal(r.failed.length, 1);
+  assert.deepEqual(r.skipped.map((o) => o.slug), ['b', 'c']);
+  assert.equal(r.remaining, 1);
 });
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);

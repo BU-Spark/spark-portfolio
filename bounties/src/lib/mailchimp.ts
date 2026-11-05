@@ -203,11 +203,18 @@ export interface MemberSnapshot {
   status: string;
 }
 
-/** Every member, paged. Used by the backfill and the reconcile route. */
-export async function listMembers(env: MailchimpEnv): Promise<MemberSnapshot[]> {
+/**
+ * Every member, paged. Used by the backfill and the reconcile route.
+ * `pages` is the number of GETs made -- each one is a Worker subrequest.
+ */
+export async function listMembers(
+  env: MailchimpEnv
+): Promise<{ members: MemberSnapshot[]; pages: number }> {
   const out: MemberSnapshot[] = [];
   const pageSize = 1000;
+  let pages = 0;
   for (let offset = 0; ; offset += pageSize) {
+    pages++;
     const page = await call<{
       members: {
         email_address: string;
@@ -235,7 +242,7 @@ export async function listMembers(env: MailchimpEnv): Promise<MemberSnapshot[]> 
     }
     if (out.length >= (page.total_items ?? 0) || (page.members ?? []).length === 0) break;
   }
-  return out;
+  return { members: out, pages };
 }
 
 /**
@@ -313,20 +320,74 @@ export function mirror(locals: unknown, work: (env: MailchimpEnv) => Promise<voi
 /**
  * Workers Free caps one request at 50 subrequests, and syncInterest makes two
  * (member PUT + tags POST). An unbounded loop over every signup dies past ~25
- * rows -- the same limit that broke Atlas bulk email on 2026-11-05. 20 rows is
- * 40 fetches, leaving headroom for the database connection.
+ * rows -- the same limit that broke Atlas bulk email on 2026-11-05. Every
+ * reconcile call stays within SUBREQUEST_BUDGET Mailchimp fetches, leaving
+ * headroom under 50 for the database connection.
  */
+export const SUBREQUEST_BUDGET = 45;
+/** 20 rows x 2 fetches = 40, inside the budget. */
 export const RECONCILE_ROWS_PER_CALL = 20;
-/** Prune makes one fetch per orphan, plus one per 1000 members to list them. */
-export const PRUNE_CLEARS_PER_CALL = 40;
 
-/** One window of `items` starting at `offset`, and where the next call starts. */
-export function reconcileSlice<T>(items: T[], offset: number, size = RECONCILE_ROWS_PER_CALL) {
-  const start = Math.max(0, Math.floor(offset) || 0);
-  const end = Math.min(items.length, start + size);
-  return {
-    batch: items.slice(start, end),
-    nextOffset: end < items.length ? end : null,
-    remaining: items.length - end,
-  };
+/**
+ * `?after=` keyset cursor: a non-negative integer bounty_interest.id, kept as a
+ * string because ids are bigint. Missing -> '0'. Invalid -> null (caller 400s).
+ */
+export function parseAfter(raw: string | null): string | null {
+  if (raw === null || raw === '') return '0';
+  return /^\d{1,18}$/.test(raw) ? raw : null;
+}
+
+/**
+ * Cursor result for one keyset page. `matching` is count(*) OVER () of rows
+ * with id > after, i.e. this page plus everything after it.
+ */
+export function keysetResult(pageIds: string[], matching: number) {
+  const remaining = Math.max(0, matching - pageIds.length);
+  return { nextAfter: remaining > 0 ? pageIds[pageIds.length - 1] : null, remaining };
+}
+
+/**
+ * How many clears one prune call may make: the budget minus the list GETs
+ * already spent. ponytail: past ~45k members (45 list pages) listing alone
+ * exhausts the budget and this returns 0; page the listing itself if that day comes.
+ */
+export function pruneClearCap(listPages: number): number {
+  return Math.max(0, SUBREQUEST_BUDGET - listPages);
+}
+
+/**
+ * Clear up to `cap` orphans in order. Once a member's clear fails, their later
+ * orphans in this call are skipped (and reported) instead of each burning a
+ * subrequest on what is almost certainly the same failure.
+ * ponytail: failures are not remembered across calls, so a member that always
+ * fails is retried first every call; add a skip-list param if that ever stalls prune.
+ */
+export async function clearOrphans<O extends { email: string }>(
+  orphans: O[],
+  cap: number,
+  clear: (o: O) => Promise<void>
+): Promise<{ cleared: number; failed: { orphan: O; error: string }[]; skipped: O[]; remaining: number }> {
+  const failedEmails = new Set<string>();
+  const failed: { orphan: O; error: string }[] = [];
+  const skipped: O[] = [];
+  let cleared = 0;
+  let attempts = 0;
+  let i = 0;
+  for (; i < orphans.length && attempts < cap; i++) {
+    const o = orphans[i];
+    const key = o.email.toLowerCase();
+    if (failedEmails.has(key)) {
+      skipped.push(o);
+      continue;
+    }
+    attempts++;
+    try {
+      await clear(o);
+      cleared++;
+    } catch (err) {
+      failedEmails.add(key);
+      failed.push({ orphan: o, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { cleared, failed, skipped, remaining: orphans.length - i };
 }
