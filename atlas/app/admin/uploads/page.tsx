@@ -791,7 +791,8 @@ function BulkPanel({ notify }: { notify: Notify }) {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `Send failed (${res.status})`);
-      notify("ok", `Emailed ${d.to}.`);
+      if (d.recordFailed) notify("err", `Emailed ${d.to}, but the send was not recorded — it will look unsent; do not resend.`);
+      else notify("ok", `Emailed ${d.to}.`);
       setGen((prev) => ({
         ...prev,
         [c.id]: {
@@ -863,13 +864,17 @@ function BulkPanel({ notify }: { notify: Notify }) {
       // Sent but not recorded: after the refresh below these rows look unsent, so
       // say so loudly or the next click emails the same PMs twice.
       const unrecorded = rows.filter((r) => r.recordFailed);
+      const titles = unrecorded.slice(0, 5).map((r) => r.title ?? "a project").join(", ") +
+        (unrecorded.length > 5 ? ` and ${unrecorded.length - 5} more` : "");
+      const problems = [
+        failed.length && `${failed.length} failed — ${failed[0].title ?? "a project"}: ${failed[0].reason}`,
+        unrecorded.length && `${unrecorded.length} sent but NOT recorded, do not resend: ${titles}`,
+      ].filter(Boolean);
       notify(
-        failed.length || unrecorded.length ? "err" : "ok",
-        failed.length
-          ? `Emailed ${d.sent}; ${failed.length} failed — ${failed[0].title ?? "a project"}: ${failed[0].reason}`
-          : unrecorded.length
-            ? `Emailed ${d.sent}, but ${unrecorded.length} send record(s) failed to save — they will look unsent; do not resend: ${unrecorded.map((r) => r.title).join(", ")}`
-            : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
+        problems.length ? "err" : "ok",
+        problems.length
+          ? `Emailed ${d.sent}; ${problems.join("; ")}`
+          : `Emailed ${d.sent} PM${d.sent === 1 ? "" : "s"}.`
       );
       // Pull the persisted send records back, so the badges reflect the database
       // rather than this session's memory of it.

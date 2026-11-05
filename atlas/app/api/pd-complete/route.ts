@@ -30,7 +30,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { getProjectAdmin, updateProject, recordPdCompletion } from "@/lib/db";
-import { checkProject, hasBlocker, statusAlive, type Finding } from "@/lib/checks";
+import { checkProject, hasBlocker, isGone, linkVerdict, type Finding } from "@/lib/checks";
 import { ORGS } from "@/lib/authz";
 
 function bearerMatches(header: string | null, token: string): boolean {
@@ -41,21 +41,23 @@ function bearerMatches(header: string | null, token: string): boolean {
 
 const LINK_CHECK_CAP = 15;
 
-/** Only http(s), and only a handful of hosts' worth of time. */
-async function linkAlive(url: string): Promise<boolean | null> {
-  if (!/^https?:\/\//i.test(url)) return false;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 5000);
+/**
+ * Final HTTP status of a dataset link, or null for "couldn't tell" (timeout,
+ * DNS, TLS), which is reported as a warning rather than counted against the
+ * submission. Callers only pass http(s) URLs (checkDatasets blocks the rest).
+ */
+async function linkStatus(url: string): Promise<number | null> {
   try {
-    // HEAD first (cheap); many hosts reject it, so a 405 is not a dead link — only
-    // 404/410 are (see statusAlive). `null` means "couldn't tell", which is reported
-    // as a warning rather than counted against the submission.
-    const res = await fetch(url, { method: "HEAD", redirect: "follow", signal: ac.signal });
-    return statusAlive(res.status);
+    // HEAD first (cheap). Some hosts 404 a HEAD yet serve the GET, so a HEAD
+    // 404/410 is retried once with GET before it counts (see linkVerdict).
+    // At most 2 fetches per link × LINK_CHECK_CAP (15) = 30, under the Worker's 50.
+    const head = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(5000) });
+    if (!isGone(head.status)) return head.status;
+    const get = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(5000) });
+    await get.body?.cancel(); // status is all we need; don't download the page
+    return get.status;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -118,14 +120,22 @@ export async function POST(req: Request) {
     for (const d of datasets.slice(0, LINK_CHECK_CAP)) {
       const url = (d.url ?? "").trim();
       if (!url) continue;
-      const alive = await linkAlive(url);
-      if (alive === false) {
+      if (!/^https?:\/\//i.test(url)) continue; // checkDatasets already blocks these
+      const status = await linkStatus(url);
+      const verdict = status === null ? null : linkVerdict(status, url);
+      if (verdict === "dead") {
         findings.push({
           code: "dataset.dead",
           severity: "blocker",
-          message: `Dataset "${d.label || url}" did not respond.`,
+          message: `Dataset "${d.label || url}" returned ${status}.`,
         });
-      } else if (alive === null) {
+      } else if (verdict === "private") {
+        findings.push({
+          code: "dataset.private",
+          severity: "warning",
+          message: `Dataset "${d.label || url}" returned ${status} — may be private.`,
+        });
+      } else if (verdict === null) {
         findings.push({
           code: "dataset.unreachable",
           severity: "warning",

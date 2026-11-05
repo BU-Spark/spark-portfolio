@@ -142,11 +142,17 @@ export async function POST(req: Request) {
   }
 
   const r = await sendUploadInvite(email, `${base}/contribute/${request.token}`, project.title, request.expiresAt);
-  if (r.sent) await markUploadRequestEmailed(request.token, email);
   if (!r.sent) {
     // sendUploadInvite never throws, so an unsent mail arrives here as a reason
     // rather than as a 500 with an empty body.
     return Response.json({ error: r.error || "Send failed" }, { status: 502 });
   }
-  return Response.json({ sent: true, to: email });
+  // Same rule as bulk: the mail is out, so a failed record is a 200 with a flag,
+  // never a 500 that invites a second send.
+  const [row] = await recordSends(
+    [{ id: projectId, title: project.title, to: email, token: request.token }],
+    [r],
+    markUploadRequestEmailed
+  );
+  return Response.json({ sent: true, to: email, ...(row.recordFailed ? { recordFailed: true } : {}) });
 }

@@ -7,7 +7,8 @@ import {
   checkProject,
   hasBlocker,
   galleryReadiness,
-  statusAlive,
+  linkVerdict,
+  isGone,
 } from "./checks";
 import type { Project, Run } from "./types";
 
@@ -137,11 +138,22 @@ describe("checkProject / readiness", () => {
   });
 });
 
-describe("statusAlive", () => {
+describe("linkVerdict", () => {
+  const u = "https://data.example.org/x.csv";
   it("treats 404/410 as dead and HEAD/auth rejections as alive", () => {
-    expect(statusAlive(404)).toBe(false);
-    expect(statusAlive(410)).toBe(false);
-    for (const s of [200, 301, 401, 403, 405]) expect(statusAlive(s)).toBe(true);
-    expect(statusAlive(503)).toBe(false);
+    expect(linkVerdict(404, u)).toBe("dead");
+    expect(linkVerdict(410, u)).toBe("dead");
+    for (const s of [200, 301, 401, 403, 405]) expect(linkVerdict(s, u)).toBe("alive");
+    expect(linkVerdict(503, u)).toBe("dead");
+  });
+  it("reports a GitHub / Hugging Face 404/410 as maybe-private, not dead", () => {
+    expect(linkVerdict(404, "https://github.com/org/private-repo")).toBe("private");
+    expect(linkVerdict(410, "https://huggingface.co/datasets/org/x")).toBe("private");
+    expect(linkVerdict(404, "https://raw.github.com/org/x")).toBe("private");
+    expect(linkVerdict(404, "https://notgithub.com/x")).toBe("dead");
+    expect(linkVerdict(200, "https://github.com/org/x")).toBe("alive");
+  });
+  it("isGone is exactly 404/410 (the statuses that trigger the GET retry)", () => {
+    expect([404, 410, 405, 403, 500].map(isGone)).toEqual([true, true, false, false, false]);
   });
 });

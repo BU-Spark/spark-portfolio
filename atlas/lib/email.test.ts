@@ -38,6 +38,7 @@ describe("recordSends", () => {
   const q = (i: number) => ({ id: `p${i}`, title: `P${i}`, to: `pm${i}@bu.edu`, token: `t${i}` });
 
   it("keeps sent:true and flags the row when the send record fails to save", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
     const mark = vi.fn(async (token: string) => {
       if (token === "t1") throw new Error("db down");
     });
@@ -50,7 +51,15 @@ describe("recordSends", () => {
     expect(r[0]).toMatchObject({ id: "p0", sent: true, reason: undefined });
     expect(r[0].recordFailed).toBeUndefined();
     expect(r[1]).toMatchObject({ id: "p1", sent: true, recordFailed: true });
-    expect(r[1].reason).toContain("db down");
+    // Raw DB error is logged server-side, never returned to the client.
+    expect(r[1].reason).toBe("sent, but the send record failed to save — do not resend");
+    expect(err).toHaveBeenCalledWith("upload invite sent but not recorded", {
+      token: "t1",
+      to: "pm1@bu.edu",
+      projectId: "p1",
+      err: "db down",
+    });
+    err.mockRestore();
     expect(r[2]).toMatchObject({ id: "p2", sent: false, reason: "bounced" });
   });
 });

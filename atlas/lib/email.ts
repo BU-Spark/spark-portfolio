@@ -125,7 +125,9 @@ export async function recordSends<T extends { id: string; title: string; to: str
       try {
         await mark(q.token, q.to);
       } catch (e) {
-        out.push({ ...row, recordFailed: true, reason: `sent, but the send record failed to save (${errorText(e)}) — do not resend` });
+        // Raw DB text stays server-side; the client only needs to know not to resend.
+        console.error("upload invite sent but not recorded", { token: q.token, to: q.to, projectId: q.id, err: errorText(e) });
+        out.push({ ...row, recordFailed: true, reason: "sent, but the send record failed to save — do not resend" });
         continue;
       }
     }

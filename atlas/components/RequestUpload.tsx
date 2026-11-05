@@ -90,6 +90,7 @@ export default function RequestUpload({ projectId }: { projectId: string }) {
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || "Could not send.");
       setSentTo(d.to ?? to);
+      if (d.recordFailed) setError("Sent, but the send was not recorded — it may look unsent later; do not resend.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not send.");
     } finally {

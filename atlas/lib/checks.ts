@@ -126,14 +126,25 @@ export function checkDatasets(datasets: Project["datasets"]): Finding[] {
   return out;
 }
 
+export const isGone = (status: number) => status === 404 || status === 410;
+
 /**
- * Whether a dataset link's HTTP status means it is still there. 404/410 say
- * "gone"; anything else under 500 is alive, because many hosts reject HEAD (405)
- * or gate access (401/403) while the link works fine in a browser.
+ * Verdict on a dataset link from its final HTTP status (the caller retries a HEAD
+ * 404/410 with GET first). 404/410 are "dead", except on GitHub / Hugging Face,
+ * where a private repo 404s to anonymous requests — that's "private", a warning.
+ * Anything else under 500 is alive: many hosts reject HEAD (405) or gate access
+ * (401/403) while the link works in a browser. 5xx counts as dead.
  */
-export function statusAlive(status: number): boolean {
-  if (status === 404 || status === 410) return false;
-  return status < 500;
+export function linkVerdict(status: number, url: string): "alive" | "dead" | "private" {
+  if (isGone(status)) {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {}
+    const privateCapable = ["github.com", "huggingface.co"].some((h) => host === h || host.endsWith(`.${h}`));
+    return privateCapable ? "private" : "dead";
+  }
+  return status < 500 ? "alive" : "dead";
 }
 
 /** A run needs a term and a course to be a real run. */
