@@ -86,6 +86,7 @@ interface FormState {
   repoUrl: string;
   prodUrl: string;
   tech: string[];
+  aliases: string[]; // other human-readable names (long form, old titles)
   team: string[]; // students (admin-only — not shown publicly)
   images: (string | null)[]; // S3 object keys
   // Visibility at creation. Never offers 'public' from here — a brand-new record
@@ -107,6 +108,7 @@ const BLANK: FormState = {
   repoUrl: "",
   prodUrl: "",
   tech: [],
+  aliases: [],
   team: [],
   images: [null, null, null, null],
   visibility: "internal",
@@ -221,6 +223,7 @@ export default function AddProjectPage() {
       repoUrl: form.repoUrl,
       prodUrl: form.prodUrl,
       tech: form.tech,
+      aliases: form.aliases,
       images: form.images.filter(Boolean),
       visibility: form.visibility,
       status: form.status,
@@ -342,6 +345,19 @@ export default function AddProjectPage() {
                 onChange={setVal("title")}
                 placeholder="e.g. Boston 311 Service Equity Dashboard"
               />
+            </div>
+
+            <div className="field">
+              <label className="lab">Aliases</label>
+              <TagInput
+                value={form.aliases}
+                onChange={set("aliases")}
+                placeholder="Long form, old names…"
+              />
+              <div className="hint">
+                Other names this project is known by. Searchable; it still displays
+                under the title. Human-readable names only — not the repo slug.
+              </div>
             </div>
 
             <div className="field">

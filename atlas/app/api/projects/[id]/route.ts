@@ -22,7 +22,7 @@ import {
   PROJECT_STATUSES,
   VISIBILITIES,
 } from "@/lib/data";
-import { publishBlockers } from "@/lib/project";
+import { parseAliases, publishBlockers } from "@/lib/project";
 
 export async function GET(
   _req: Request,
@@ -122,6 +122,12 @@ export async function PATCH(
     patch.topics = (body.topics as unknown[])
       .map((t) => String(t).trim())
       .filter(Boolean);
+  // Alternate names. Validated here; trimmed/deduped against the title in updateProject.
+  if (body.aliases !== undefined) {
+    const a = parseAliases(body.aliases);
+    if ("error" in a) return Response.json({ error: a.error }, { status: 400 });
+    patch.aliases = a.aliases;
+  }
   if (Array.isArray(body.datasets))
     patch.datasets = (body.datasets as Record<string, unknown>[])
       .map((d) => ({

@@ -58,6 +58,9 @@ export interface Project {
   clientUrl?: string | null; // the client ORG's website (link icon by the org name)
   clientDesc?: string | null; // short "about the client" blurb (expandable dropdown; public)
   topics?: string[]; // subject-matter tags (Criminal Justice, Healthcare, …)
+  // Other human-readable names (long form, old titles). Public + searchable; the
+  // project still displays under `title`. Never ids/repo slugs.
+  aliases?: string[];
   datasets?: ProjectDataset[]; // datasets used, shown next to "View project"
   images?: (string | null)[]; // up to four image URLs; first is the cover
   featured?: boolean; // spotlighted on the gallery

@@ -10,7 +10,7 @@ import {
   type NewProject,
 } from "@/lib/db";
 import { disciplineFromCourse, VISIBILITIES } from "@/lib/data";
-import { publishBlockers } from "@/lib/project";
+import { parseAliases, publishBlockers } from "@/lib/project";
 
 function slugify(s: string): string {
   return s
@@ -85,6 +85,12 @@ export async function POST(req: Request) {
   if (!str("title")) {
     return Response.json({ error: "Missing required: title" }, { status: 400 });
   }
+  let aliases: string[] = [];
+  if (body.aliases !== undefined) {
+    const a = parseAliases(body.aliases);
+    if ("error" in a) return Response.json({ error: a.error }, { status: 400 });
+    aliases = a.aliases;
+  }
   if (!runs.length) {
     return Response.json(
       { error: "At least one run with term, course, and discipline is required" },
@@ -101,6 +107,7 @@ export async function POST(req: Request) {
     contact: str("contact") || null,
     contacts,
     tech: arr("tech"),
+    aliases, // normalised against the title in addProject
     images: arr("images"), // S3 object keys
     runs,
     repoUrl: str("repoUrl") || null,

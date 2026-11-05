@@ -45,6 +45,7 @@ export default async function CDSPage() {
     .map((p) => ({
       id: p.id,
       title: p.title,
+      aliases: p.aliases ?? [],
       discipline: primaryDiscipline(p),
       topics: p.topics ?? [],
       term: latestTerm(p),
