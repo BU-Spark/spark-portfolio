@@ -2673,6 +2673,9 @@ export async function addUploadRequestImage(
 }
 
 // Atomic remove BY VALUE (not index → no index-shift race). Best-effort S3 delete.
+// `$2 = ANY(images)` is the authorization: the object is deleted only when it is
+// one of THIS link's pending images. Without it any open token could delete any
+// key in the bucket, including other projects' approved screenshots.
 export async function removeUploadRequestImage(
   token: string,
   key: string
@@ -2682,6 +2685,7 @@ export async function removeUploadRequestImage(
     `UPDATE upload_requests
        SET images = array_remove(images, $2)
      WHERE token = $1 AND status = 'open' AND expires_at > now()
+       AND $2 = ANY(images)
      RETURNING ${UPLOAD_REQ_COLS}`,
     [token, key]
   );

@@ -123,6 +123,14 @@ export async function DELETE(
   }
   if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
   const updated = await removeUploadRequestImage(token, key);
-  if (!updated) return Response.json({ error: "Link expired or invalid." }, { status: 410 });
+  if (!updated) {
+    // A live link that does not hold this key (a double-click, or someone else's
+    // key) is a 404, not "expired": the link still works.
+    const live = await getUploadRequest(token);
+    if (live && live.status === "open" && new Date(live.expiresAt) > new Date()) {
+      return Response.json({ error: "That image is not part of this upload." }, { status: 404 });
+    }
+    return Response.json({ error: "Link expired or invalid." }, { status: 410 });
+  }
   return Response.json({ images: updated.images });
 }
