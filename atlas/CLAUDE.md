@@ -6,19 +6,22 @@ Backend is **live**: Railway Postgres (`pg`) + Railway S3 + Auth.js (Google OAut
 (called `hub/` before 2026-08; `hub/` is now the link-in-bio page). Design is inline-style; fonts are IBM Plex Sans (body) and Space Grotesk
 (display/bold).
 
-## Where this actually runs (measured 2026-08-24)
-**The production domain is `atlas.buspark.io`.** Two deployment targets exist and they
-disagree — check before assuming, and note the Vercel one is expected to be torn down.
+## Where this actually runs (measured 2026-11-05)
+**The production domain is `atlas.buspark.io`, and it is NOT deployed from git.** Probe
+before assuming what code it serves.
 
-| | State |
+| Host | State on 2026-11-05 |
 |---|---|
-| `atlas.buspark.io` (+ `int.atlas.buspark.io`) | **the real production host.** Cloudflare Worker, live, but on **stale code**: `/api/import` answers 401, while `/api/digest/weekly` and `/api/pd-complete` 404 — so the build predates `95a0353` |
-| `sparkshowcase.vercel.app` | interim host, **current code**, kept alive only until the Worker is redeployed |
-| `hub.buspark.io` / `int.hub.buspark.io` | **never existed.** No DNS record on Cloudflare's own nameservers |
+| `atlas.buspark.io` | **production.** Cloudflare Worker, live, on a build that has `/api/ops/health` (401) and `/api/digest/weekly` (401) but **not** #331 (project aliases) — so `main` is ahead of prod |
+| `int.atlas.buspark.io` | **down** — stale Hyperdrive password (issue #80) |
+| `sparkshowcase.vercel.app` | **torn down** — 404 `DEPLOYMENT_NOT_FOUND` |
+| `hub.buspark.io` | the link-in-bio page (`hub/`), 200 "BU Spark! — Hub". Not Atlas |
 
-`atlas/` is built for Cloudflare Workers: `wrangler.jsonc` (prod) / `wrangler.int.jsonc`
-(int), `@opennextjs/cloudflare`, Hyperdrive. There is no committed `.vercel`;
-`npm run deploy` is `wrangler deploy`.
+**Deploys are manual.** PRs show Workers Builds checks for `spark-portfolio-int`,
+`spark-hub` and `bounties-site`, but none for the prod `spark-portfolio` Worker, so
+merging to `main` ships nothing to `atlas.buspark.io`. Someone with Cloudflare access
+runs, from `atlas/`: `npx opennextjs-cloudflare build && npx wrangler deploy`
+(`wrangler.jsonc` = prod, `wrangler.int.jsonc` = int; Hyperdrive for the DB).
 
 **A wrong conclusion recorded here on 2026-08-21, so nobody repeats it:** the config
 said `hub.buspark.io`, that name had no DNS record, and `custom_domain: true` creates

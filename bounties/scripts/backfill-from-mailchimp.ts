@@ -44,7 +44,7 @@ if (APPLY && !dbUrl) throw new Error('Missing DATABASE_URL (required for --apply
 
 console.log(`Mode: ${APPLY ? 'APPLY (writes to Postgres)' : 'DRY RUN (no writes)'}\n`);
 
-const members = await listMembers(mc);
+const { members } = await listMembers(mc);
 console.log(`Mailchimp members: ${members.length}`);
 
 const byStatus = new Map<string, number>();
