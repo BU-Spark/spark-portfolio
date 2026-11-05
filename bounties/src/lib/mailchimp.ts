@@ -389,5 +389,6 @@ export async function clearOrphans<O extends { email: string }>(
       failed.push({ orphan: o, error: err instanceof Error ? err.message : String(err) });
     }
   }
-  return { cleared, failed, skipped, remaining: orphans.length - i };
+  // Skipped orphans are still in Mailchimp, so they count as outstanding work.
+  return { cleared, failed, skipped, remaining: orphans.length - i + skipped.length };
 }

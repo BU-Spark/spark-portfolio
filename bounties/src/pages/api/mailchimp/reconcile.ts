@@ -176,6 +176,9 @@ async function runPrune(locals: unknown, mc: NonNullable<ReturnType<typeof resol
   const cap = pruneClearCap(pages);
   const r = await clearOrphans(orphans, cap, (o) => clearInterest(mc, o.email, o.slug, o.teamId));
   const failures = r.failed.map((f) => `prune ${f.orphan.slug}/${f.orphan.email}: ${f.error}`);
+  // Listing alone used the whole subrequest budget: no call can make progress, so
+  // say so instead of returning success with prune_remaining that never shrinks.
+  if (cap === 0 && orphans.length) failures.push(`audience too large to prune per call (${pages} list pages)`);
   return {
     success: failures.length === 0,
     prune_enabled: true,

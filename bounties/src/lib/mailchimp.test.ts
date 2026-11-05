@@ -227,7 +227,7 @@ await check('prune: a failing member is tried once per call, later orphans still
   assert.equal(r.cleared, 2);
   assert.equal(r.failed.length, 1);
   assert.deepEqual(r.skipped.map((o) => o.slug), ['b', 'c']);
-  assert.equal(r.remaining, 1);
+  assert.equal(r.remaining, 3); // 1 unreached + 2 skipped
 });
 
 console.log(failed === 0 ? '\nall passed' : `\n${failed} FAILED`);
