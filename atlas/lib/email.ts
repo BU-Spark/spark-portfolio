@@ -29,14 +29,9 @@ export function emailConfigured(): boolean {
  * Best-effort send. Returns { sent: false } (never throws) when Resend isn't
  * configured or the send fails, so the caller always falls back to copy-link.
  */
-export async function sendUploadInvite(
-  to: string,
-  url: string,
-  projectTitle: string,
-  expiresAt: string
-): Promise<{ sent: boolean; error?: string }> {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) return { sent: false };
+export type Invite = { to: string; url: string; projectTitle: string; expiresAt: string };
+
+function inviteEmail({ to, url, projectTitle, expiresAt }: Invite) {
   // The real date, not "14 days": a re-send reuses the link's original expiry.
   const expires = new Date(expiresAt).toLocaleDateString("en-US", {
     month: "long",
@@ -44,14 +39,12 @@ export async function sendUploadInvite(
     year: "numeric",
     timeZone: "America/New_York",
   });
-  try {
-    const resend = new Resend(apiKey);
-    const { error } = await resend.emails.send({
-      from: FROM,
-      replyTo: REPLY_TO,
-      to,
-      subject: `Add screenshots for "${projectTitle}" — BU Spark!`,
-      html: `
+  return {
+    from: FROM,
+    replyTo: REPLY_TO,
+    to,
+    subject: `Add screenshots for "${projectTitle}" — BU Spark!`,
+    html: `
         <div style="font-family:system-ui,sans-serif;font-size:15px;color:#16191c;line-height:1.5">
           <p>Hi,</p>
           <p>You've been asked to add up to 4 screenshots for the BU Spark! project
@@ -64,18 +57,53 @@ export async function sendUploadInvite(
           <p style="color:#9a9a9a;font-size:12.5px">This link is for this project only and
              expires on ${expires}. You can forward it to a teammate. No login required.</p>
         </div>`,
-    });
-    // Resend returns an OBJECT here ({ name, message, statusCode }), and
-    // String(obj) is the literal text "[object Object]" — which is what the admin
-    // uploads page displayed as the reason a PM invite failed, destroying the one
-    // piece of information that would have explained it (an unverified sending
-    // domain, a rejected address, a rate limit). Pull the message out, and fall
-    // back to JSON rather than to a stringify that cannot fail informatively.
-    if (error) return { sent: false, error: errorText(error) };
-    return { sent: true };
-  } catch (e) {
-    return { sent: false, error: e instanceof Error ? e.message : "send failed" };
+  };
+}
+
+/**
+ * Best-effort send. Returns { sent: false } (never throws) when Resend isn't
+ * configured or the send fails, so the caller always falls back to copy-link.
+ */
+export async function sendUploadInvite(
+  to: string,
+  url: string,
+  projectTitle: string,
+  expiresAt: string
+): Promise<{ sent: boolean; error?: string }> {
+  return (await sendUploadInvites([{ to, url, projectTitle, expiresAt }]))[0];
+}
+
+// Resend's batch endpoint takes up to 100 messages per call.
+const BATCH = 100;
+
+/**
+ * Send many invites, one Resend call per 100. One call per message is what broke
+ * bulk outreach on 2026-11-05: a Worker request may make only 50 outbound
+ * fetches, so message 51 onward failed while the key itself was fine. Results
+ * line up with `invites` by index. A batch fails or succeeds as a whole, so a
+ * rejected address fails the other messages in its chunk too, with the reason.
+ */
+export async function sendUploadInvites(
+  invites: Invite[]
+): Promise<{ sent: boolean; error?: string }[]> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return invites.map(() => ({ sent: false }));
+  const resend = new Resend(apiKey);
+  const out: { sent: boolean; error?: string }[] = [];
+  for (let i = 0; i < invites.length; i += BATCH) {
+    const chunk = invites.slice(i, i + BATCH);
+    let error: string | undefined;
+    try {
+      // Resend returns an OBJECT error ({ name, message, statusCode }); String()
+      // of it is "[object Object]", which hid the real reason once already.
+      const r = await resend.batch.send(chunk.map(inviteEmail));
+      if (r.error) error = errorText(r.error);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "send failed";
+    }
+    for (const _ of chunk) out.push(error ? { sent: false, error } : { sent: true });
   }
+  return out;
 }
 
 function escapeHtml(s: string): string {

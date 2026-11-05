@@ -19,7 +19,7 @@ import {
   getPeopleMap,
   markUploadRequestEmailed,
 } from "@/lib/db";
-import { sendUploadInvite, emailConfigured } from "@/lib/email";
+import { sendUploadInvite, sendUploadInvites, emailConfigured, type Invite } from "@/lib/email";
 import { normalizeName } from "@/lib/gdocs";
 
 function baseUrl(req: Request): string {
@@ -73,9 +73,10 @@ export async function POST(req: Request) {
       reason?: string;
     }[] = [];
 
+    // Resolve every recipient first, then send in one batched call: one fetch
+    // per message trips the Worker's 50-subrequest cap (see sendUploadInvites).
+    const queued: { id: string; title: string; to: string; token: string; invite: Invite }[] = [];
     for (const id of ids) {
-      // Per-project ownership check: a bulk call must not become a way around
-      // the gate that the single-project path enforces.
       const pg = await requireProject(id);
       if (!pg.ok) {
         results.push({ id, sent: false, reason: "not yours to send" });
@@ -97,18 +98,20 @@ export async function POST(req: Request) {
         results.push({ id, title: project.title, sent: false, reason: "no PM email on file" });
         continue;
       }
-      const r = await sendUploadInvite(to, `${base}/contribute/${request.token}`, project.title, request.expiresAt);
-      // Recorded only on success. Minting does not email, so this is the only
-      // record that anyone was asked — the approvals nudge and the weekly digest
-      // both key off it, and a failed send must not start a 7-day chase clock.
-      if (r.sent) await markUploadRequestEmailed(request.token, to);
-      results.push({
+      queued.push({
         id,
         title: project.title,
         to,
-        sent: r.sent,
-        reason: r.sent ? undefined : r.error || "send failed",
+        token: request.token,
+        invite: { to, url: `${base}/contribute/${request.token}`, projectTitle: project.title, expiresAt: request.expiresAt },
       });
+    }
+
+    const sends = await sendUploadInvites(queued.map((q) => q.invite));
+    for (const [i, q] of queued.entries()) {
+      const r = sends[i];
+      if (r.sent) await markUploadRequestEmailed(q.token, q.to);
+      results.push({ id: q.id, title: q.title, to: q.to, sent: r.sent, reason: r.sent ? undefined : r.error || "send failed" });
     }
 
     return Response.json({
