@@ -39,6 +39,8 @@ function bearerMatches(header: string | null, token: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+const LINK_CHECK_CAP = 15;
+
 /** Only http(s), and only a handful of hosts' worth of time. */
 async function linkAlive(url: string): Promise<boolean | null> {
   if (!/^https?:\/\//i.test(url)) return false;
@@ -102,7 +104,18 @@ export async function POST(req: Request) {
   // Link liveness is opt-in per request: it's the only part that makes outbound calls,
   // so a form submission shouldn't pay for it unless asked.
   if (body.checkLinks === true) {
-    for (const d of project.datasets ?? []) {
+    // ponytail: a Worker request may make only 50 outbound fetches, and a redirect
+    // costs one more, so a long dataset list would fail mid-check (the bulk-email
+    // outage of 2026-11-05 was this). Check the first LINK_CHECK_CAP and say so.
+    const datasets = (project.datasets ?? []).filter((d) => (d.url ?? "").trim());
+    if (datasets.length > LINK_CHECK_CAP) {
+      findings.push({
+        code: "dataset.unchecked",
+        severity: "warning",
+        message: `Only the first ${LINK_CHECK_CAP} of ${datasets.length} dataset links were checked.`,
+      });
+    }
+    for (const d of datasets.slice(0, LINK_CHECK_CAP)) {
       const url = (d.url ?? "").trim();
       if (!url) continue;
       const alive = await linkAlive(url);
