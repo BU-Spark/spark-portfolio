@@ -53,10 +53,10 @@ describe("recordSends", () => {
     expect(r[1]).toMatchObject({ id: "p1", sent: true, recordFailed: true });
     // Raw DB error is logged server-side, never returned to the client.
     expect(r[1].reason).toBe("sent, but the send record failed to save — do not resend");
+    // The token is the upload link's only credential: log its tail, never all of it.
     expect(err).toHaveBeenCalledWith("upload invite sent but not recorded", {
-      token: "t1",
-      to: "pm1@bu.edu",
       projectId: "p1",
+      tokenTail: "t1",
       err: "db down",
     });
     err.mockRestore();

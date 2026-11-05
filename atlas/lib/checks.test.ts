@@ -148,6 +148,9 @@ describe("linkVerdict", () => {
   });
   it("reports a GitHub / Hugging Face 404/410 as maybe-private, not dead", () => {
     expect(linkVerdict(404, "https://github.com/org/private-repo")).toBe("private");
+    // a lookalike host is not GitHub
+    expect(linkVerdict(404, "https://github.com.evil.example/x")).toBe("dead");
+    expect(linkVerdict(404, "https://notgithub.com/x")).toBe("dead");
     expect(linkVerdict(410, "https://huggingface.co/datasets/org/x")).toBe("private");
     expect(linkVerdict(404, "https://raw.github.com/org/x")).toBe("private");
     expect(linkVerdict(404, "https://notgithub.com/x")).toBe("dead");

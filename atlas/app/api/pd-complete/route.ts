@@ -39,7 +39,7 @@ function bearerMatches(header: string | null, token: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-const LINK_CHECK_CAP = 15;
+const LINK_CHECK_CAP = 8;
 
 /**
  * Final HTTP status of a dataset link, or null for "couldn't tell" (timeout,
@@ -50,7 +50,8 @@ async function linkStatus(url: string): Promise<number | null> {
   try {
     // HEAD first (cheap). Some hosts 404 a HEAD yet serve the GET, so a HEAD
     // 404/410 is retried once with GET before it counts (see linkVerdict).
-    // At most 2 fetches per link × LINK_CHECK_CAP (15) = 30, under the Worker's 50.
+    // HEAD + one GET retry per link, and every redirect hop is its own subrequest,
+    // so LINK_CHECK_CAP (8) leaves room for ~3 hops each under the Worker's 50.
     const head = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(5000) });
     if (!isGone(head.status)) return head.status;
     const get = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(5000) });
