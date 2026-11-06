@@ -71,6 +71,6 @@ export async function POST(req: Request) {
     return Response.json({ error: "Merge failed — one of the projects no longer exists." }, { status: 409 });
   }
 
-  revalidateTag("projects"); // refresh cached public gallery/detail
+  revalidateTag("projects", { expire: 0 }); // refresh cached public gallery/detail
   return Response.json({ ok: true, id: survivorId });
 }

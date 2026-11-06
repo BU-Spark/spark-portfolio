@@ -62,7 +62,7 @@ export async function POST(req: Request) {
           );
         }
         if (!projectId) return Response.json({ error: "Row not found" }, { status: 404 });
-        revalidateTag("projects");
+        revalidateTag("projects", { expire: 0 });
         return Response.json({ ok: true, projectId });
       }
       if (body.action === "merge") {
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
           );
         }
         if (!ok) return Response.json({ error: "Row or project not found" }, { status: 404 });
-        revalidateTag("projects");
+        revalidateTag("projects", { expire: 0 });
         return Response.json({ ok: true, projectId });
       }
       if (body.action === "dismiss") {
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
           { status: 404 }
         );
       }
-      revalidateTag("projects");
+      revalidateTag("projects", { expire: 0 });
       return Response.json({ ok: true });
     }
     default:

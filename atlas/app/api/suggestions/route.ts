@@ -85,7 +85,7 @@ export async function POST(req: Request) {
 
   if (Object.keys(applied).length) {
     await updateProject(s.projectId, applied);
-    revalidateTag("projects");
+    revalidateTag("projects", { expire: 0 });
   }
   // `applied` can legitimately be empty — e.g. the suggestion was only a
   // contributorsNote, or the gaps got filled between submission and review. The

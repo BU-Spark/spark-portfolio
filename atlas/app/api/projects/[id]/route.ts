@@ -229,7 +229,7 @@ export async function PATCH(
 
   await updateProject(id, patch);
   if (nextOrg) await setProjectOwnerOrg(id, nextOrg);
-  revalidateTag("projects");
+  revalidateTag("projects", { expire: 0 });
   return Response.json({ ok: true });
 }
 
@@ -241,6 +241,6 @@ export async function DELETE(
   const g = await requireProject(id);
   if (!g.ok) return g.res;
   await removeProject(id);
-  revalidateTag("projects");
+  revalidateTag("projects", { expire: 0 });
   return Response.json({ ok: true });
 }

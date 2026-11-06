@@ -3,7 +3,9 @@
 import NextAuth from "next-auth";
 import { authConfig } from "./auth.config";
 
-export const { auth: middleware } = NextAuth(authConfig);
+// ponytail: kept as middleware.ts (edge), not proxy.ts (Node) — OpenNext on Workers runs edge middleware only.
+const { auth } = NextAuth(authConfig);
+export default auth;
 
 export const config = {
   matcher: ["/admin/:path*"],

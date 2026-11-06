@@ -159,7 +159,7 @@ export async function POST(req: Request) {
     accepted,
     findings,
   });
-  revalidateTag("projects");
+  revalidateTag("projects", { expire: 0 });
 
   return Response.json({
     ok: true,
