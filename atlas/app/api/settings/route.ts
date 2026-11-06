@@ -103,7 +103,7 @@ export async function PUT(req: Request) {
   };
 
   await saveGallerySettings(next);
-  revalidateTag("gallery-settings");
-  revalidateTag("projects"); // discipline/clientType vocab affects gallery facets
+  revalidateTag("gallery-settings", { expire: 0 });
+  revalidateTag("projects", { expire: 0 }); // discipline/clientType vocab affects gallery facets
   return Response.json({ ok: true, settings: next });
 }

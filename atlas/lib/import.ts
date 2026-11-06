@@ -350,7 +350,7 @@ export async function runImport(
 
   // No cache bust on a dry run — nothing changed, and busting would make a preview
   // cost every visitor a cold render.
-  if (updated.length && !dry) revalidateTag("projects"); // refresh cached public pages
+  if (updated.length && !dry) revalidateTag("projects", { expire: 0 }); // refresh cached public pages
 
   return {
     ok: true,

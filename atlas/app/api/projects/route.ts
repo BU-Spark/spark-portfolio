@@ -150,6 +150,6 @@ export async function POST(req: Request) {
   }
 
   await addProject(project);
-  revalidateTag("projects"); // refresh the cached public gallery/detail
+  revalidateTag("projects", { expire: 0 }); // refresh the cached public gallery/detail
   return Response.json({ ok: true, id: project.id });
 }

@@ -30,6 +30,6 @@ export async function POST(
   // actor always has an email, so the audit trail can no longer read "unknown".
   const result = await approveUploadRequest(token, finalKeys, g.actor);
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-  revalidateTag("projects"); // approved screenshots are now on the project
+  revalidateTag("projects", { expire: 0 }); // approved screenshots are now on the project
   return Response.json({ ok: true });
 }
