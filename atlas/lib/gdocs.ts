@@ -241,10 +241,15 @@ export function extractContacts(docText: string): PdContacts {
     const last = cells[i + 2] || "";
     // First cell after the role must be a plain name, not another role/email/header.
     if (!first || looksEmail(first) || roleOf(first) || /^(first|last) name$/i.test(first)) continue;
-    const parts = [first, last].filter((x) => x && !looksEmail(x) && !roleOf(x) && !/name$/i.test(x));
+    // A bare role label in the LAST-name slot ("Instructor") is the next row's
+    // label — this row's last name was blank — so it is dropped like a known role.
+    const parts = [first, last].filter(
+      (x, k) => x && !looksEmail(x) && !roleOf(x) && !/name$/i.test(x) && !(k === 1 && ROLE_LABEL_ONLY.test(x))
+    );
     const name = parts.join(" ").trim();
     const email = looksEmail(cells[i + 3]) ? cells[i + 3] : looksEmail(last) ? last : null;
-    if (name) out[role] = { name, email };
+    // Nothing but a placeholder / role label ("Teammate 1") → the row was blank.
+    if (cleanPersonName(name)) out[role] = { name, email };
   }
   return out;
 }
@@ -365,15 +370,21 @@ export function cleanClientName(raw: string): string {
 // Placeholder cell values that mean "no person assigned" — dropped so they don't
 // become bogus directory entries or project role values.
 const PERSON_SKIP = /^(tbd|tba|n\/?a|none|n\.a\.?|\?+|[-–—.]+)$/i;
+// A value made up ONLY of role labels — "Teammate 1", "Mentor Mentor", "EIR - Ad
+// hoc" — is no person either. Whole-value, so a label glued to a real name
+// ("Class Instructor Morgan") is deliberately left alone.
+const ROLE_LABEL_ONLY =
+  /^(?:[\s()\/–—-]*(?:teammate(?:\s*\d+)?|mentor|(?:class\s+)?instructor|(?:expert|entrepreneur) in residence|eir|ad[\s-]?hoc|previous semester['’]?s work))+[\s()]*$/i;
 
 /**
  * Clean a person's name out of a tracker cell for the role fields (Program Lead,
  * PM, TPM, advisors, EIR). Like cleanClientName, takes the first line and drops a
  * trailing ", email"; additionally returns "" for placeholder values (TBD/N/A/…)
- * so the importer skips them instead of storing junk or stubbing a fake person.
+ * and bare role labels, so the importer skips them instead of storing junk or
+ * stubbing a fake person.
  */
 export function cleanPersonName(raw: string): string {
   const name = cleanClientName(raw);
-  if (!name || PERSON_SKIP.test(name)) return "";
+  if (!name || PERSON_SKIP.test(name) || ROLE_LABEL_ONLY.test(name)) return "";
   return name;
 }
