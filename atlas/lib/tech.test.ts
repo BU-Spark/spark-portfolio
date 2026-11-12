@@ -135,19 +135,15 @@ describe("PD noise (contact table, headings, template)", () => {
   it("a note that is only a template header and stray punctuation is empty", () => {
     expect(cleanTechNote("/ Design System\n\t.\n\tData")).toBe("");
     expect(parseTechStack("/ Design System\n\t.\n\tData")).toEqual({ tags: [], raw: "", mode: "empty" });
-    // "Data" inside a real line is untouched.
+    // "Data" inside a real line, or heading a list of sources, is untouched.
     expect(cleanTechNote("• Python\n• Data Studio")).toBe("• Python\n• Data Studio");
+    expect(cleanTechNote("Data:\n• Census ACS\nTools:\n• Python")).toBe("Data:\n• Census ACS\nTools:\n• Python");
   });
 
-  it("stops the note at a tab-indented 'Questions' heading", () => {
-    const tech = "• Google Looker Studio for visualizations\n• Wordpress*";
-    const questions = "\tHow does each legislator vote?\nHow many votes do legislators miss, and how often?";
-    expect(cleanTechNote(`${tech}\n\tQuestions\n${questions}`)).toBe(tech);
-    expect(cleanTechNote(`${tech}\n• Key Questions:\n${questions}`)).toBe(tech);
-    // A tech line that merely contains the word is kept.
-    expect(cleanTechNote("• Python\n• Chatbot for answering questions\n• React")).toBe(
-      "• Python\n• Chatbot for answering questions\n• React"
-    );
+  it("keeps a 'Questions' section and whatever follows it", () => {
+    // Real cells carry project questions here, sometimes with more stack after them.
+    const note = "• Python\n• R\nQuestions:\n• AWS or on-prem?\nFrontend\n• React";
+    expect(cleanTechNote(note)).toBe(note);
   });
 
   it("'Python, Jupyter Notebooks' splits into two tags", () => {
