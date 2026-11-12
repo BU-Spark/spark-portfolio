@@ -179,6 +179,30 @@ describe("extractContacts", () => {
     // Andrea (Client) must not leak into any role.
     expect(JSON.stringify(c)).not.toContain("Andrea");
   });
+  it("skips a role whose name cells are blank and run on into the next rows' labels", () => {
+    // Blank cells vanish from the export, so the next rows' role labels sit
+    // where the first/last name would be.
+    const blank = [
+      "Project Contact Information:",
+      "Role", "First Name", "Last Name", "Email",
+      "PM", "Mentor", "Mentor",
+      "TPM", "Teammate 1",
+      "EIR", "(Expert in Residence)", "Class Instructor",
+      "Spark! Tech Advisor", "Teammate", "Previous Semester's Work",
+    ].join("\n");
+    expect(extractContacts(blank)).toEqual({});
+  });
+  it("drops a role label read as the last name; a label before the name is left as is", () => {
+    const head = ["Project Contact Information:", "Role", "First Name", "Last Name", "Email"];
+    expect(extractContacts([...head, "EIR", "Ricardo", "Instructor", "Morgan"].join("\n")).eir).toEqual({
+      name: "Ricardo",
+      email: null,
+    });
+    expect(extractContacts([...head, "EIR", "Class Instructor", "Morgan"].join("\n")).eir).toEqual({
+      name: "Class Instructor Morgan",
+      email: null,
+    });
+  });
   it("returns {} when there is no contact section", () => {
     expect(extractContacts("Project Description:\nA summary.")).toEqual({});
   });

@@ -102,20 +102,24 @@ const JUNK_TAG_RE = /^(?:tbd|n\/?a|data|questions|see figma)$|^_+$/i;
 
 // A line that opens meeting notes / a new doc tab: everything after is dropped.
 const MEETING_RE = /^(?:client meeting|meeting\s*\d+|tab\s*\d+|quick recap)\b/i;
+// The next PD section's heading, alone on its line: the tech block ran on into it.
+const QUESTIONS_HEAD_RE = /^(?:key )?questions$/i;
 const CONTACT_HEAD_RE = /^(?:first name|last name|email)$/i;
 // Unfilled template instructions, left behind when nobody filled the cell.
 const TEMPLATE_LINE_RE =
-  /^(?:list of tools|if a client works with|include links to recommended|\/?\s*design system(?: used)?$)/i;
+  /^(?:list of tools|if a client works with|in most cases,? the client will not have this|include links to recommended|\/?\s*design system(?: used)?$)/i;
+// A line that is only a placeholder, a stray "Data" header or punctuation.
+const PLACEHOLDER_LINE_RE = /^(?:\(?(?:tbd|n\/?a|confirm with client)\)?|data|[^\p{L}\p{N}]+)$/iu;
 const ANCHOR_RE = /\[[a-z]{1,2}\]/g; // Google Docs comment anchors: "[b]", "[ab]"
 
 const bare = (l: string) => l.replace(BULLET_RE, "").replace(/[:\s]+$/, "").trim();
 
 /**
  * Clean the raw PD tech cell: cut at the contact table ("Role" then
- * "First Name"/"Last Name"/"Email") or meeting notes / tab markers, drop
- * Google Docs comment anchors, unfilled template instructions and
- * underscore-only rules. The result is what we store as the admin tech note
- * and what tags are derived from.
+ * "First Name"/"Last Name"/"Email"), meeting notes / tab markers or a
+ * "Questions" heading, drop Google Docs comment anchors, unfilled template
+ * instructions, lone placeholders and underscore-only rules. The result is
+ * what we store as the admin tech note and what tags are derived from.
  */
 export function cleanTechNote(text: string): string {
   const lines = (text || "").replace(/\r\n/g, "\n").split("\n");
@@ -123,6 +127,11 @@ export function cleanTechNote(text: string): string {
   for (let i = 0; i < lines.length; i++) {
     const b = bare(lines[i]);
     if (MEETING_RE.test(b) || /^role\s*[\t|]\s*(?:first name|last name|email)\b/i.test(b)) {
+      end = i;
+      break;
+    }
+    // Not as the very first line: a cell that opens with it is left as before.
+    if (i > 0 && QUESTIONS_HEAD_RE.test(b)) {
       end = i;
       break;
     }
@@ -139,7 +148,7 @@ export function cleanTechNote(text: string): string {
     .map((l) => l.replace(ANCHOR_RE, "").replace(/\s+$/, ""))
     .filter((l) => {
       const b = bare(l);
-      return b && !/^_+$/.test(b) && !TEMPLATE_LINE_RE.test(b);
+      return b && !/^_+$/.test(b) && !TEMPLATE_LINE_RE.test(b) && !PLACEHOLDER_LINE_RE.test(b);
     })
     .join("\n")
     .trim();

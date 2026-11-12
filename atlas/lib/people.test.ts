@@ -24,6 +24,27 @@ describe("cleanPersonName", () => {
     }
   });
 
+  it("drops values that are only role labels (no person in them)", () => {
+    for (const v of [
+      "Teammate",
+      "Teammate 1",
+      "Mentor Mentor",
+      "(Expert in Residence) Class Instructor",
+      "EIR - Ad hoc",
+      "Teammate Previous Semester's Work",
+    ]) {
+      expect(cleanPersonName(v)).toBe("");
+    }
+  });
+
+  it("leaves a role label glued to a name, and a name with a handle, untouched", () => {
+    for (const v of ["Class Instructor Morgan", "Ricardo Instructor", "Ava (avajyip)"]) {
+      expect(cleanPersonName(v)).toBe(v);
+    }
+    // Alias lookup keys are unchanged for anything that is not a pure placeholder.
+    expect(normalizeName(cleanPersonName("Ava (avajyip)"))).toBe("ava (avajyip)");
+  });
+
   it("empty / whitespace → empty", () => {
     expect(cleanPersonName("")).toBe("");
     expect(cleanPersonName("   ")).toBe("");

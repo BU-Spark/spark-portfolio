@@ -115,6 +115,41 @@ describe("PD noise (contact table, headings, template)", () => {
     expect(r.tags).toEqual(["Figma"]);
   });
 
+  it("drops the template sentence that follows the 'please list here' instruction", () => {
+    const tpl =
+      "In most cases, the client will not have this and our tech stake will be based on both (a) Spark! Tech Stack and (b) recommendations emerging from research on what approach makes most sense given client budget and capacity";
+    expect(cleanTechNote(`If a client works with a specific tech stack or programs, please list here.\n${tpl}`)).toBe("");
+    expect(cleanTechNote(`• ${tpl.toUpperCase()}\n• Python`)).toBe("• Python");
+  });
+
+  it("drops lone placeholder lines from the note", () => {
+    expect(cleanTechNote("(Confirm with Client)")).toBe("");
+    expect(cleanTechNote("* TBD")).toBe("");
+    expect(cleanTechNote("• TBD")).toBe("");
+    expect(cleanTechNote("• Python\n• TBD\n(confirm with client)\n• R")).toBe("• Python\n• R");
+    // Only a WHOLE-line placeholder goes; prose that mentions one stays.
+    expect(cleanTechNote("Python (confirm with client)")).toBe("Python (confirm with client)");
+    expect(cleanTechNote("Database TBD")).toBe("Database TBD");
+  });
+
+  it("a note that is only a template header and stray punctuation is empty", () => {
+    expect(cleanTechNote("/ Design System\n\t.\n\tData")).toBe("");
+    expect(parseTechStack("/ Design System\n\t.\n\tData")).toEqual({ tags: [], raw: "", mode: "empty" });
+    // "Data" inside a real line is untouched.
+    expect(cleanTechNote("• Python\n• Data Studio")).toBe("• Python\n• Data Studio");
+  });
+
+  it("stops the note at a tab-indented 'Questions' heading", () => {
+    const tech = "• Google Looker Studio for visualizations\n• Wordpress*";
+    const questions = "\tHow does each legislator vote?\nHow many votes do legislators miss, and how often?";
+    expect(cleanTechNote(`${tech}\n\tQuestions\n${questions}`)).toBe(tech);
+    expect(cleanTechNote(`${tech}\n• Key Questions:\n${questions}`)).toBe(tech);
+    // A tech line that merely contains the word is kept.
+    expect(cleanTechNote("• Python\n• Chatbot for answering questions\n• React")).toBe(
+      "• Python\n• Chatbot for answering questions\n• React"
+    );
+  });
+
   it("'Python, Jupyter Notebooks' splits into two tags", () => {
     expect(parseTechStack("Python, Jupyter Notebooks").tags).toEqual(["Python", "Jupyter Notebooks"]);
     expect(parseTechStack("• Python, Jupyter Notebooks (for EDA)").tags).toEqual([
