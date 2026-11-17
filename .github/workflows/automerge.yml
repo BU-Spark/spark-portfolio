@@ -16,9 +16,13 @@
 # register after those), none are pending, none have failed. A PR with a failed
 # check is left open and untouched, never retried.
 #
-# Runs every 10 minutes rather than on check events: the Cloudflare checks are
-# external and do not fire workflow_run, and a cron is one code path instead of
-# three event shapes that each have to agree on "all green".
+# Runs when something that decides "all green" can have changed: the label is
+# added, CI finishes (workflow_run), or an outside app's checks finish
+# (check_suite: CodeRabbit, Cloudflare). Every event runs the same sweep below,
+# so there is still one code path. A 6-hourly cron catches anything missed.
+# It used to run every 10 minutes: 144 runs a day, each billed as at least a
+# minute, which used up the org's Actions minutes (908 of the first 1,000 runs
+# in November 2026 were this workflow).
 #
 # SECURITY: nothing from github.event.* is interpolated anywhere. The only
 # expression is github.repository, passed through env. PR numbers come from the
@@ -26,8 +30,15 @@
 name: automerge
 
 on:
+  pull_request_target:
+    types: [labeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  check_suite:
+    types: [completed]
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "0 */6 * * *"
   workflow_dispatch: {}
 
 permissions:
